@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f6efe3">
+<title>插花台</title>
+<link rel="stylesheet" href="./fonts/maoken/result.css">
+<script type="importmap">{"imports":{"three":"./vendor/three@0.170.0/build/three.module.min.js","three/addons/":"./vendor/three@0.170.0/examples/jsm/"}}</script>
+<style>
+/* 插花台：从花园剪花去插，换花器；画法跟花园同一套 */
+:root{--paper:#f6efe3;--ink:#5b4a44;--soft:#a8968c;--brick:#9f3726;--card:rgba(255,252,246,.92)}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+body,html{height:100%;background:#fbfaf6;overflow:hidden}
+body{color:var(--ink);font:13px/1.7 "MaoKenTangYuan (beta)",-apple-system,"PingFang SC",sans-serif;-webkit-user-select:none;user-select:none}
+button{font:inherit;color:inherit;border:0;background:0 0;cursor:pointer}
+#cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.top{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;pointer-events:none}
+.top h1{font-size:16px;font-weight:400;letter-spacing:.3em;flex:1}
+.top a{pointer-events:auto;padding:6px 14px;border-radius:20px;background:var(--card);font-size:12px;color:var(--ink);text-decoration:none;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12)}
+.hint{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top) + 50px);text-align:center;font-size:11px;letter-spacing:.12em;color:var(--soft);z-index:4;pointer-events:none}
+.panel{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 12px);transform:translateX(-50%) rotate(-.4deg);z-index:6;width:calc(100% - 24px);max-width:420px;background:var(--card);border-radius:18px;padding:10px 12px 12px;box-shadow:0 14px 40px -16px rgba(80,50,40,.45),0 0 0 .5px rgba(90,60,50,.15)}
+.panel h3{font-size:11px;font-weight:400;letter-spacing:.2em;color:var(--soft);margin:2px 2px 4px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:0 0 auto;padding:6px 12px;border-radius:16px;background:#fff;font-size:13px;box-shadow:0 0 0 .5px rgba(90,60,50,.18);white-space:nowrap}
+.chips button:nth-child(odd){transform:rotate(-1.5deg)}
+.chips button:nth-child(2n){transform:rotate(1.5deg)}
+.chips button.on{background:var(--brick);color:#fbf7ef}
+.chips button.used{opacity:.35}
+.chips button i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:3px;vertical-align:-1px;box-shadow:0 0 0 .5px rgba(90,60,50,.25)}
+.chips button small{font-size:10px;color:var(--soft);margin-left:4px}
+.chips button.on small{color:#f3e2d8}
+.row{display:flex;gap:8px;margin-top:4px}
+.go{flex:1;padding:8px 0;border-radius:20px;background:var(--ink);color:var(--paper);font-size:13px;letter-spacing:.2em;text-indent:.2em;transition:opacity .2s}
+.go.ghost{background:none;color:var(--ink);box-shadow:inset 0 0 0 .5px rgba(90,60,50,.4)}
+.go:disabled{opacity:.3}
+.toast{position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);z-index:9;background:var(--ink);color:var(--paper);padding:8px 18px;border-radius:16px;font-size:13px;letter-spacing:.1em;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.on{opacity:.92}
+</style></head><body>
+<canvas id="cv"></canvas>
+<div class="top"><h1>插 花 台</h1><a href="./?home">回花园</a></div>
+<p class="hint" id="hint">点花插进去 · 拖花头调方向 · 拖远了拔掉</p>
+<div class="panel">
+  <h3>花 器</h3><div class="chips" id="vases"></div>
+  <h3 id="flTitle">从 花 园 剪 的（最 多 七 枝）</h3><div class="chips" id="flowers"></div>
+  <div class="row"><button class="go ghost" id="pull" disabled>拔 掉</button><button class="go ghost" id="png">存 成 图</button><button class="go" id="save">摆 到 店 里</button></div>
+</div>
+<div class="toast" id="toast"></div>
+<script type="module" src="./ikebana.js"></script>
+</body></html>

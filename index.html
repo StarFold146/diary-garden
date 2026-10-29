@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f6efe3">
+<title>日记花园</title>
+<link rel="stylesheet" href="./fonts/maoken/result.css">
+<script type="importmap">{"imports":{"three":"./vendor/three@0.170.0/build/three.module.min.js","three/addons/":"./vendor/three@0.170.0/examples/jsm/"}}</script>
+<style>
+/* 进门两页沿用暮园资料页的样式，只换内容，加写字和配图 */
+:root{--paper:#f6efe3;--ink:#5b4a44;--soft:#a8968c;--red:#a8172c;--brick:#9f3726;--card:rgba(255,252,246,.92)}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+body,html{height:100%;background:var(--paper);overflow:hidden}
+body{color:var(--ink);font:13px/1.7 "MaoKenTangYuan (beta)",-apple-system,"PingFang SC",sans-serif;-webkit-user-select:none;user-select:none}
+button{font:inherit;color:inherit;border:0;background:0 0;cursor:pointer}
+#cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.scr{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top) + 24px) 22px calc(env(safe-area-inset-bottom) + 24px);background:var(--paper);opacity:0;pointer-events:none;transition:opacity .5s ease}
+.scr.on{opacity:1;pointer-events:auto}
+h2{font-size:16px;font-weight:400;letter-spacing:.12em;margin-bottom:6px;text-align:center}
+.sub{font-size:11px;color:var(--soft);letter-spacing:.2em;margin-bottom:20px}
+.moods{display:flex;flex-wrap:wrap;justify-content:center;gap:12px 10px;max-width:320px}
+.moods button{padding:8px 16px;border-radius:20px;background:var(--card);font-size:14px;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12);transition:transform .15s ease,background .2s,color .2s}
+.moods button:nth-child(odd){transform:rotate(-2deg)}
+.moods button:nth-child(2n){transform:rotate(2deg)}
+.moods button.on{background:var(--brick);color:#fbf7ef}
+.moods.full{animation:nope .35s}
+/* 选到丧的心情会飞出颜文字 */
+.kao{position:fixed;z-index:50;pointer-events:none;color:#fff;font:15px/1 -apple-system,"PingFang SC",sans-serif;white-space:nowrap;text-shadow:0 0 6px rgba(0,0,0,.75),0 0 14px rgba(0,0,0,.45)}
+@keyframes nope{0%,100%{translate:0}25%{translate:-5px}75%{translate:5px}}
+.note{margin-top:22px;width:min(300px,100%);background:var(--card);border-radius:16px;padding:12px 14px 8px;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12);transform:rotate(-1deg)}
+.note textarea{display:block;width:100%;min-height:68px;border:0;background:none;resize:none;outline:none;font:inherit;font-size:14px;line-height:1.7;color:var(--ink);-webkit-user-select:text;user-select:text}
+.note textarea::placeholder{color:var(--soft)}
+.note .pic{display:flex;align-items:center;gap:8px;border-top:.5px dashed rgba(90,60,50,.25);padding-top:6px;margin-top:4px;font-size:12px;color:var(--soft)}
+.note .pic label{cursor:pointer;color:var(--ink)}
+.note .pic img{height:34px;border-radius:5px;transform:rotate(3deg)}
+.pop{position:absolute;left:50%;top:46%;width:248px;transform:translate(-50%,-50%);background:var(--card);border-radius:18px;padding:20px 18px 12px;text-align:center;box-shadow:0 14px 40px -16px rgba(80,50,40,.4),0 0 0 .5px rgba(90,60,50,.15);transition:left .28s cubic-bezier(.3,1.4,.5,1),top .28s cubic-bezier(.3,1.4,.5,1)}
+.pop p{font-size:14px;line-height:1.7;margin-bottom:14px}
+.pop .row{display:flex;border-top:.5px solid rgba(90,60,50,.18)}
+.pop .row button{flex:1;padding:10px 0 4px;font-size:14px}
+.pop .row button+button{border-left:.5px solid rgba(90,60,50,.18)}
+.pop .yes{color:var(--red)}
+.go{margin-top:26px;padding:9px 30px;border-radius:20px;background:var(--ink);color:var(--paper);font-size:14px;letter-spacing:.3em;text-indent:.3em;transition:opacity .2s}
+.go:disabled{opacity:.3}
+.skip{margin-top:12px;font-size:11px;color:var(--soft);letter-spacing:.2em}
+.ld{font-size:13px;letter-spacing:.3em}
+#run{width:min(86vw,340px);height:auto;aspect-ratio:340/110;margin-top:18px;display:block;touch-action:manipulation;image-rendering:pixelated}
+.bar{width:min(60vw,220px);height:6px;border-radius:3px;background:rgba(90,60,50,.12);overflow:hidden;margin-top:16px}
+.bar i{display:block;height:100%;width:0;border-radius:3px;background:var(--brick);transition:width .3s}
+.tip{margin-top:12px;font-size:11px;color:var(--soft)}
+.credit{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 28px);text-align:center;font-size:11px;line-height:1.9;color:var(--soft);letter-spacing:.12em}
+.credit b{font-weight:400;color:var(--ink);letter-spacing:.2em}
+/* 花园里 */
+#hud{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;pointer-events:none}
+#hud h1{font-size:16px;font-weight:400;letter-spacing:.2em;flex:1}
+#hud button{pointer-events:auto;padding:6px 14px;border-radius:20px;background:var(--card);font-size:12px;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12)}
+#hint{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 14px);text-align:center;font-size:11px;letter-spacing:.12em;color:var(--soft);z-index:4;pointer-events:none}
+.sheet{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 16px);transform:translateX(-50%) rotate(-.6deg);z-index:8;width:calc(100% - 32px);max-width:380px;background:var(--card);border-radius:18px;padding:16px 16px 14px;box-shadow:0 14px 40px -16px rgba(80,50,40,.45),0 0 0 .5px rgba(90,60,50,.15)}
+.sheet[hidden]{display:none}
+.sheet .date{font-size:11px;color:var(--soft);letter-spacing:.1em}
+.sheet .txt{font-size:15px;line-height:1.75;margin:6px 0 10px;white-space:pre-wrap}
+.sheet img{display:block;width:100%;max-height:200px;object-fit:cover;border-radius:10px;margin-bottom:10px}
+.sheet .x{position:absolute;right:12px;top:8px;font-size:18px;color:var(--soft)}
+.sheet .go{margin-top:4px;padding:7px 22px;font-size:13px}
+#menu .go{display:block;width:100%;margin-top:8px;text-align:center}
+#menu .go.ghost{background:none;color:var(--ink);box-shadow:inset 0 0 0 .5px rgba(90,60,50,.4)}
+#pc{width:100%;border-radius:8px;box-shadow:0 6px 20px rgba(40,30,20,.2)}
+</style></head><body>
+<canvas id="cv"></canvas>
+
+<section class="scr on" id="s0">
+  <div class="pop" id="pop"><p id="popTxt">此乃神秘模拟经营小游戏<br>真的要玩吗✌︎' ֊'</p>
+  <div class="row" id="popRow"><button class="no" id="no">不要</button><button class="yes" id="yes">要</button></div></div>
+</section>
+
+<section class="scr" id="s1">
+  <h2 id="greet">今天的心情是？</h2>
+  <p class="sub">最 多 选 三 个</p>
+  <div class="moods" id="moods"></div>
+  <div class="note">
+    <textarea id="line" maxlength="140" placeholder="写一句今天……"></textarea>
+    <div class="pic"><label>配一张图<input id="photo" type="file" accept="image/*" hidden></label><img id="thumb" hidden alt=""></div>
+  </div>
+  <button class="go" id="plant" disabled>种 下</button>
+  <button class="skip" id="skip">今天不写，直接回家</button>
+</section>
+
+<section class="scr" id="s2">
+  <p class="ld">回 家 中</p>
+  <canvas id="run" width="340" height="110"></canvas>
+  <div class="bar"><i id="barI"></i></div>
+  <p class="tip" id="tip">点一下小螃蟹会跳</p>
+  <p class="credit">这座花园拆自记忆小镇 <b>暮园 · Hesperides</b></p>
+</section>
+
+<div id="hud"><h1>我的花园</h1><button id="vaseBtn">插花</button><button id="shopBtn">店里</button><button id="kitBtn">厨房</button><button id="addBtn">写一句</button><button id="menuBtn">···</button></div>
+<div id="hint" hidden>拖动转着看 · 按住一朵花拖着挪 · 点一下看那天</div>
+
+<div class="sheet" id="card" hidden><button class="x" data-close>×</button>
+  <div class="date" id="cDate"></div><div class="txt" id="cTxt"></div><img id="cImg" hidden alt="">
+  <button class="go" id="cPost">做 成 明 信 片</button>
+</div>
+<div class="sheet" id="post" hidden><button class="x" data-close>×</button>
+  <canvas id="pc" width="1200" height="800"></canvas>
+  <button class="go" id="pSave" style="margin-top:12px">存 到 手 机</button>
+</div>
+<div class="sheet" id="menu" hidden><button class="x" data-close>×</button>
+  <div style="font-size:14px;letter-spacing:.2em;margin-bottom:4px">花 园</div>
+  <button class="go" id="mExport">把花园打包带走</button>
+  <label class="go ghost">从文件搬回来<input id="mImport" type="file" accept=".json,application/json" hidden></label>
+  <button class="go ghost" id="mDemo">放二十天的样子看看</button>
+  <button class="go ghost" id="mClear">清空重来</button>
+</div>
+
+<script type="module" src="./main.js"></script>
+</body></html>
