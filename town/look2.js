@@ -1,4 +1,4 @@
-// 小镇的后期：小店 look.js 的水彩后期，加一层近景移轴景深。
+// 后期：小店 look.js 的水彩后期，加一层近景移轴景深。
 import * as THREE from 'three';
 
 // 水彩后期
@@ -40,7 +40,7 @@ export function makeLook(renderer, paper = '#f6efe3') {   // 跟小店那份一�
           e += abs(L(texture2D(tex, uv+o).rgb) - L(c));
         }
         c *= 1. - clamp(e*.55, 0., .22);
-        // 暖光（别让光太平）：亮处偏暖、暗处偏冷，亮的地方轻轻晕开
+        // 暖光：亮处偏暖、暗处偏冷，亮的地方轻轻晕开
         vec3 glow = vec3(0.);
         for (int i = 0; i < 8; i++) { float a = float(i) * .785 + .3; glow += max(texture2D(tex, uv + vec2(cos(a), sin(a)) * px * 12.).rgb - .74, 0.); }
         c += glow / 8. * warm * vec3(1., .82, .55) * .9;

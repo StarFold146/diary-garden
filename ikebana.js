@@ -1,7 +1,7 @@
 // 插花台：从花园剪开着的花来插，五种花器换着用；镜头近、花少，所以花和花器都比花园里细
 // 画法跟花园同一套：shop/look.js 的卡通光+描边，town/look2.js 的水彩后期
-// 第二版（改掉花像贴纸、枝像棍子、蕨像塑料、花器廉价、花不分高低这些毛病）：
-//   花瓣按樱花瓣那套规则参数化（倒卵形、勺子兜、梢缺口、翻边、裙边褶、两侧折痕、每片各自歪），根深梢浅用顶点色；
+// 细节：
+//   花瓣参数化（倒卵形、勺子兜、梢缺口、翻边、裙边褶、两侧折痕、每片各自歪），根深梢浅用顶点色；
 //   枝是渐细的弯管，叶有中脉有垂头；蓝雪花是一枝松散的小枝，枝梢几团小五瓣；配叶换成尤加利和真蕨两种；
 //   花器重车：矮陶钵、玉壶春白瓷、玻璃杯、编织篮、粗陶壶；插法按真插花三主枝：主枝高、副枝中、客枝低，配叶贴口。
 import * as THREE from 'three';
@@ -9,6 +9,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mat, washTex, outline, shadowAll } from './shop/look.js';
 import { makeLook } from './town/look2.js';
 import { C } from './shop/house.js';
+import * as Day from './day.js';   /* 插好的摆进园子的花位 */
+import * as Hy from './hybrid.js';   /* 杂交：花按基因捏，新花在面板里能插、长按改名 */
 
 const $ = (s) => document.querySelector(s);
 const DAY = 86400e3, MAX = 7;
@@ -84,11 +86,11 @@ function surf(NU, NV, fn) {
 }
 const skin = (c, o = {}) => mat(c, { side: THREE.DoubleSide, vertexColors: true, ...o });
 
-// ---------- 花瓣（樱花瓣的参数化）：u 沿瓣长 0 根→1 梢，v 横向 -1..1 ----------
+// ---------- 花瓣（照 画/樱花/sakura.py）：u 沿瓣长 0 根→1 梢，v 横向 -1..1 ----------
 const petalCache = new Map();
-function petalGeo({ L = .16, Wd = .12, cup = 1, reflex = 1, ruffle = 1, seed = 0, key = '' }) {
-  const k = key + ':' + seed; if (petalCache.has(k)) return petalCache.get(k);
-  const r = rng(seed + 11), ph1 = r() * 6.28, ph2 = r() * 6.28, notch = .06 + r() * .04, crease = .7 + r() * .5, skew = (r() - .5) * .1, foldMid = r() * .06;
+function petalGeo({ L = .16, Wd = .12, cup = 1, reflex = 1, ruffle = 1, notch: notch0 = null, seed = 0, key = '' }) {
+  const k = key + ':' + seed + ':' + L + ':' + Wd + ':' + cup + ':' + reflex + ':' + ruffle + ':' + notch0; if (petalCache.has(k)) return petalCache.get(k);
+  const r = rng(seed + 11), ph1 = r() * 6.28, ph2 = r() * 6.28, nr = .06 + r() * .04, notch = notch0 == null ? nr : notch0, crease = .7 + r() * .5, skew = (r() - .5) * .1, foldMid = r() * .06;
   const width = (u) => Wd * .5 * (.1 + .9 * Math.pow(Math.sin(Math.min(1, u / .6) * Math.PI / 2), 1.1));
   const g = surf(20, 10, (u0, v) => {
     const uend = .8 + .2 * Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(v), 2.2))) - notch * Math.exp(-Math.pow(v / .14, 2)), u = u0 * uend, w = width(u);
@@ -158,7 +160,7 @@ function bend(a, d, len, tilt, r, lateral = .05, pre = null) {
   const tip = a.clone().addScaledVector(d, len).add(new THREE.Vector3(0, -tilt * len * .11, 0)).addScaledVector(side, wob * .4);
   return new THREE.CatmullRomCurve3(pre ? [pre, a, p1, p2, tip] : [a, p1, p2, tip], false, 'centripetal', .6);
 }
-/* 整根枝：口下面一截竖直（在瓶子里、在水里），到口才按方向弯出去。不然细颈瓶的配叶会从肩膀穿出来 */
+/* 整根枝：口下面一截竖直（在瓶子里、在水里），到口才按方向弯出去。这样细颈瓶的配叶不会从肩膀穿出来 */
 function stemPath(root, a, d, len, tilt, r, lateral) {
   const a0 = a.clone().add(new THREE.Vector3(0, -.04, 0)), path = new THREE.CurvePath();
   path.add(new THREE.LineCurve3(root, a0)); path.add(bend(a, d, len, tilt, r, lateral, a0));
@@ -181,16 +183,18 @@ function center(s, c = '#e9d27a') {
   return g;
 }
 /* 五瓣一朵，外圈五片张开、里圈五片错位半开（花才有厚度）；每片各自歪、各自的褶 */
-function blossom(cs, s, seed, open = .95) {
+function blossom(cs, s, seed, open = .95, P = null) {
   const r = rng(seed), g = new THREE.Group();
   const ring = (n, sc, op, off, lift) => {
     for (let i = 0; i < n; i++) {
       const pv = new THREE.Group(); pv.rotation.y = i / n * Math.PI * 2 + off + (r() - .5) * .18;
-      const m = new THREE.Mesh(petalGeo({ seed: seed * 7 + i + (off ? 50 : 0), key: 'p' }), skin(cs[i % cs.length])); m.userData.noLine = true;
+      const m = new THREE.Mesh(petalGeo({ ...(P ? P.petal : {}), seed: seed * 7 + i + (off ? 50 : 0), key: 'p' }), skin(cs[i % cs.length])); m.userData.noLine = true;
       m.rotation.x = -Math.PI / 2 + op + (r() - .5) * .22; m.position.y = lift; m.scale.setScalar(s * sc * (.92 + r() * .16)); pv.add(m); g.add(pv);
     }
   };
-  ring(5, 1, open, 0, 0); ring(5, .68, open * .62, Math.PI / 5, .004 * s);
+  const n = P ? P.n : 5;
+  ring(n, 1, open, 0, 0); ring(n, .68, open * .62, Math.PI / n, .004 * s);
+  if (P && P.dbl) ring(n, .46, open * .38, Math.PI / n * .5 + .2, .008 * s);   /* 重瓣：里面再挤一圈 */
   g.add(center(s));
   return g;
 }
@@ -203,11 +207,12 @@ function calyx(s, host) {
 }
 
 // ---------- 蓝雪花（平静）：松散一小枝，枝梢几团小五瓣，叶是小卵形 ----------
-function plumbago(cs, seed, s = 1) {
+function plumbago(cs, seed, s = 1, P = null) {
+  const pp = P ? { Wd: .036 * P.petal.Wd / .12, ruffle: .3 * P.petal.ruffle, notch: P.petal.notch * .4 } : {}, nn = P ? P.n : 5;
   const r = rng(seed), g = new THREE.Group();
   const tiny = (i) => {
     const f = new THREE.Group();
-    for (let k = 0; k < 5; k++) { const pv = new THREE.Group(); pv.rotation.y = k / 5 * Math.PI * 2 + (r() - .5) * .2; const m = new THREE.Mesh(petalGeo({ L: .042, Wd: .036, cup: .4, reflex: .3, ruffle: .3, seed: 300 + (i % 4), key: 'q' }), skin(cs[k % cs.length])); m.userData.noLine = true; m.rotation.x = -Math.PI / 2 + 1.2 + (r() - .5) * .2; pv.add(m); f.add(pv); }
+    for (let k = 0; k < nn; k++) { const pv = new THREE.Group(); pv.rotation.y = k / nn * Math.PI * 2 + (r() - .5) * .2; const m = new THREE.Mesh(petalGeo({ L: .042, Wd: .036, cup: .4, reflex: .3, ruffle: .3, ...pp, seed: 300 + (i % 4), key: 'q' }), skin(cs[k % cs.length])); m.userData.noLine = true; m.rotation.x = -Math.PI / 2 + 1.2 + (r() - .5) * .2; pv.add(m); f.add(pv); }
     const th = new THREE.Mesh(new THREE.CylinderGeometry(.003, .0035, .02, 5), mat('#b8d2e6')); th.position.y = -.01; th.userData.noLine = true; f.add(th);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(.004, 6, 4), mat('#f6f6f2')); eye.position.y = .003; eye.userData.noLine = true; f.add(eye);
     return f;
@@ -288,14 +293,15 @@ function setVase(k) {
 
 // ---------- 花枝：锚在花器口里，按主枝/副枝/客枝/配叶分高低 ----------
 let stems = [], sel = null, dirty = true;
-/* 三主枝（花要高高低低）：主枝最高近乎直立，副枝七成高往一侧斜，客枝一半高往另一侧前倾；再加的花在中低之间，配叶贴着口 */
+/* 三主枝：主枝最高近乎直立，副枝七成高往一侧斜，客枝一半高往另一侧前倾；再加的花在中低之间，配叶贴着口 */
 const TIERS = { shin: { len: 1, tilt: .1 }, soe: { len: .72, tilt: .5 }, hikae: { len: .46, tilt: .75 }, mid: { len: .62, tilt: .42 }, low: { len: .42, tilt: .65 }, filler: { len: .4, tilt: .8 } };
 const tiltOf = (st) => Math.min(1.2, st.tilt * vase.spread + (vase.spread - .7) * .25 * st.off);
 function dirOf(st) { const t = tiltOf(st); return new THREE.Vector3(Math.sin(t) * Math.cos(st.phi), Math.cos(t), Math.sin(t) * Math.sin(st.phi)); }
 function anchorOf(st) { const r = vase.r * st.off; return new THREE.Vector3(Math.cos(st.phi) * r, vase.mouth, Math.sin(st.phi) * r); }
 function build(st) {
   if (st.obj) S.remove(st.obj);
-  const g = new THREE.Group(), a = anchorOf(st), d = dirOf(st), len = st.len * vase.Lb, tilt = tiltOf(st);
+  const P = st.f.filler ? null : Hy.paramsOf(Hy.genesOf(st.f));   /* 基因 → 瓣数瓣形兜褶、花头大小、枝高 */
+  const g = new THREE.Group(), a = anchorOf(st), d = dirOf(st), len = st.len * vase.Lb * (P ? P.height : 1), tilt = tiltOf(st);
   st.seed = st.seed || (Math.random() * 1000 | 0); const r = rng(st.seed);
   const root = a.clone().add(new THREE.Vector3(0, -vase.depth - .05, 0));   // 从口下面起，像真插在水里
   const curve = stemPath(root, a, d, len, tilt, r, .04), tip = curve.getPointAt(1), tg = curve.getTangentAt(1);
@@ -310,11 +316,11 @@ function build(st) {
       for (let i = 0; i < 22; i++) { const t = .26 + i / 22 * .72, { p, tg } = sample(t), s = Math.sin(Math.min(1, (t - .26) / .5) * Math.PI * .5 + .35) * (1 - t * .4) * 1.1; for (const side of [1, -1]) hangLeaf(g, leafGeo({ L: .09, W: .02, kind: 'lance', seed: 90 + i % 3 }), LEAF_C[(i + (side > 0)) % 2 + 1], p, tg, side * 1.4, s, .5); }
       hangLeaf(g, leafGeo({ L: .07, W: .016, kind: 'lance', seed: 93 }), LEAF_C[2], tip, tg, 0, .3, .95);
     }
-  } else if ((st.f.moods && st.f.moods[0]) === 'calm' || st.f.mood === 'calm') {
-    /* 蓝雪花：木质细枝，分两叉，每个枝梢一团七八朵小五瓣，枝上小卵叶 */
-    const cs = (st.f.moods && st.f.moods.length ? st.f.moods : [st.f.mood]).map(colorOf);
+  } else if (P.cluster) {
+    /* 蓝雪花（和攒球那一支基因的杂交花）：木质细枝，分两叉，每个枝梢一团七八朵小五瓣，枝上小卵叶 */
+    const cs = Hy.colorsOf(st.f);
     g.add(stemMesh(curve, .006, .0035, TWIG_C));
-    const pb = plumbago(cs, st.seed, 1), { cluster } = pb.userData.plumbago; g.add(pb);
+    const pb = plumbago(cs, st.seed, 1, P), { cluster } = pb.userData.plumbago; g.add(pb);
     g.add(cluster(tip, tg, 9));
     for (const [t, ang, L] of [[.62, 1.3, .22], [.8, -1.6, .17]]) {
       const { p, tg: tt } = sample(t), side = new THREE.Vector3().crossVectors(tt, UP).normalize(), dd = tt.clone().lerp(side.multiplyScalar(Math.sign(ang)), .55).normalize();
@@ -327,10 +333,10 @@ function build(st) {
     /* 叶：下面两三片大的，上面一两片小的，交互着生，各自歪 */
     const n = 3 + (r() * 2 | 0);
     for (let i = 0; i < n; i++) { const t = .32 + i / n * .5 + r() * .06, { p, tg } = sample(t); hangLeaf(g, leafGeo({ L: .2, W: .075, kind: i % 3 === 2 ? 'ovate' : 'lance', seed: st.seed + i }), LEAF_C[(r() * 4) | 0], p, tg, i * 2.4 + r() * .8, (1.1 - t * .5) * (.9 + r() * .3), .3); }
-    const ids = st.f.moods && st.f.moods.length ? st.f.moods : [st.f.mood], cs = ids.map(colorOf);
-    const head = blossom(cs, 1.15, st.seed, 1.05 + r() * .25); head.position.copy(tip);
+    const cs = Hy.colorsOf(st.f);
+    const head = blossom(cs, P.scale, st.seed, 1.05 + r() * .25, P); head.position.copy(tip);
     head.quaternion.setFromUnitVectors(UP, tg.clone().lerp(UP, .25).add(new THREE.Vector3(0, 0, .45)).normalize()); head.rotateY(r() * 6.28);   // 花脸微微朝看的人，像朝着窗
-    calyx(1.15, head); g.add(head);
+    calyx(P.scale, head); g.add(head);
   }
   const hit = new THREE.Mesh(new THREE.SphereGeometry(.09, 8, 6), new THREE.MeshBasicMaterial({ visible: false })); hit.position.copy(tip); hit.userData.noLine = true; hit.userData.st = st; g.add(hit);
   const ring = new THREE.Mesh(new THREE.TorusGeometry(.085, .005, 6, 32), mat('#9f3726')); ring.position.copy(tip); ring.quaternion.setFromUnitVectors(UP, d); ring.rotateX(Math.PI / 2); ring.visible = st === sel; ring.userData.noLine = true; g.add(ring);
@@ -393,10 +399,24 @@ function fillPanel() {
   pool.forEach((f) => {
     const b = document.createElement('button'), d = new Date(f.at), ids = f.moods && f.moods.length ? f.moods : [f.mood];
     b.dataset.id = f.id;
-    b.innerHTML = ids.map((id) => `<i style="background:${colorOf(id)}"></i>`).join('') + (ids[0] === 'calm' ? '蓝雪花' : nameOf(ids[0]) || '花') + `<small>${f.sample ? '样例' : (d.getMonth() + 1) + '.' + d.getDate()}</small>`;
+    b.innerHTML = ids.map((id) => `<i style="background:${colorOf(id)}"></i>`).join('') + Hy.nameOf(Hy.baseId(ids[0])) + `<small>${f.sample ? '样例' : (d.getMonth() + 1) + '.' + d.getDate()}</small>`;
     b.onclick = () => { const st = stems.find((s) => s.f.id === f.id); if (st) { select(st); return; } addStem(f); };
     fb.appendChild(b);
   });
+  /* 园子里配出来的新花：点了插一枝（同一种能插几枝），长按改名 */
+  const hs = Hy.hybrids();
+  if (hs.length) {
+    const t = document.createElement('h3'); t.textContent = '园 子 里 配 出 来 的（长 按 改 名）'; const hb = document.createElement('div'); hb.className = 'chips'; hb.id = 'hybrids'; fb.after(t); t.after(hb);
+    hs.forEach((sp) => {
+      const b = document.createElement('button'), pn = (sp.parents || []).map(Hy.nameOf).join('×');
+      const draw = () => { b.innerHTML = `<i style="background:${Hy.hexOf(sp.genes)}"></i>${sp.name}<small>${pn}</small>`; }; draw();
+      let hold = 0, held = false;
+      b.onpointerdown = () => { held = false; hold = setTimeout(() => { held = true; const nm = prompt('给它起个名字', sp.name); if (nm && Hy.rename(sp.id, nm)) { sp.name = nm.trim().slice(0, 6); draw(); toast('记下了'); } }, 600); };
+      const cancel = () => clearTimeout(hold); b.onpointerup = cancel; b.onpointerleave = cancel; b.onpointercancel = cancel;
+      b.onclick = () => { if (held) return; addStem({ id: 'h' + sp.id + ':' + Date.now(), species: sp.id, at: Date.now(), mood: 'sweet', hybrid: true }); };
+      hb.appendChild(b);
+    });
+  }
 }
 $('#pull').onclick = () => { if (sel) { removeStem(sel); toast('拔出来了'); } };
 
@@ -405,9 +425,12 @@ function vaseDb() { return new Promise((ok, no) => { const r = indexedDB.open('d
 $('#save').onclick = async () => {
   if (!stems.length) { toast('还一枝都没插'); return; }
   try {
-    const d = await vaseDb(), rec = { id: 'v' + Date.now(), at: Date.now(), vase: vaseKey, stems: stems.map((s) => ({ fid: s.f.id, filler: !!s.f.filler, moods: s.f.filler ? [] : s.f.moods || [s.f.mood], tier: s.tier, phi: s.phi, tilt: s.tilt, len: s.len, off: s.off, seed: s.seed })) };
+    const d = await vaseDb(), rec = { id: 'v' + Date.now(), at: Date.now(), vase: vaseKey, stems: stems.map((s) => ({ fid: s.f.id, filler: !!s.f.filler, moods: s.f.filler ? [] : s.f.moods || [s.f.mood], tier: s.tier, phi: s.phi, tilt: s.tilt, len: s.len, off: s.off, seed: s.seed, species: s.f.filler ? null : Hy.speciesIdOf(s.f) })) };
     await new Promise((ok, no) => { const t = d.transaction('vases', 'readwrite'); t.objectStore('vases').put(rec); t.oncomplete = ok; t.onerror = () => no(t.error); });
-    d.close(); toast('摆到店里了');
+    d.close();
+    /* 摆进园子：找空花位（起步两个），满了就先收在库里 */
+    const put = Day.placeVase({ id: rec.id, vase: rec.vase, at: rec.at, colors: rec.stems.map((s) => s.filler ? 'leaf' : Hy.hexOf(Hy.genesOf({ species: s.species }))), species: rec.stems.map((s) => s.species) });   /* species 给杂交认爸妈 */
+    toast('存在这台设备里了，园子还在路上');
   } catch (e) { toast('没存上'); }
 };
 $('#png').onclick = async () => {
@@ -426,5 +449,5 @@ $('#png').onclick = async () => {
   /* 只在有变化的时候画（手机上省电） */
   CTL.addEventListener('change', () => { dirty = true; });
   R.setAnimationLoop(() => { CTL.update(); if (dirty) { dirty = false; LOOK.render(S, CAM); } });
-  window.__ike = { addStem, pool: () => pool, setVase, stems: () => stems, sel: select, screen: (st) => { const v = st.hit.getWorldPosition(new THREE.Vector3()).project(CAM); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; } };
+  window.__ike = { addStem, Hy, pool: () => pool, setVase, stems: () => stems, sel: select, screen: (st) => { const v = st.hit.getWorldPosition(new THREE.Vector3()).project(CAM); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; } };
 })();

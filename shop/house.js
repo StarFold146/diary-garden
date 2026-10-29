@@ -241,7 +241,7 @@ export function buildHouse(dec = DEFAULT_DECOR) {
   const knob = new THREE.Mesh(new THREE.SphereGeometry(.022, 8, 6), mat(C.butter)); knob.position.set(.88, .52, fz + .07); B.add(knob);
   const step = box(.66, .06, .2, C.stoneD); step.position.set(.7, .03, fz + .1); B.add(step);
   // 招牌
-  const sign = box(W1 + .02, .24, .06, [mat(C.redD), mat(C.redD), mat(C.redD), mat(C.redD), mat('#ffffff', { map: signTex(...(dec.sign || ['Café Jardin', '日记花园的小店'])) }), mat(C.redD)]);
+  const sign = box(W1 + .02, .24, .06, [mat(C.redD), mat(C.redD), mat(C.redD), mat(C.redD), mat('#ffffff', { map: signTex(...(dec.sign || ['Café', '我的小店'])) }), mat(C.redD)]);
   sign.position.set(0, H1 - .12 + .01, fz + .035); B.add(sign);
   const aw = awning(W1 + .06, .42, .26, aw2); aw.position.set(0, H1 - .26, fz + .05); B.add(aw);
   // 侧面（-x）一扇小窗、门口两个花槽
