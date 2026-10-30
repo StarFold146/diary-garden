@@ -13,6 +13,7 @@ import * as LAND from './town/land.js';
 import * as FR from './town/fr.js';
 import * as Day from './day.js';   /* 种子、花位、换天 */
 import * as Hy from './hybrid.js';   /* 杂交：两盆挨着过一夜冒苗 */
+import { buildFarHills } from './hills.js';   /* 远山 */
 
 /* 量 init 每一步花多久 */
 let stage = '';
@@ -101,8 +102,15 @@ async function initInner(canvas, moods) {
   S = new THREE.Scene(); S.background = new THREE.Color(G.paper); S.fog = new THREE.Fog(G.paper, 42, 85);
   CAM = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, .8, 140);   /* near 拉到 .8：iPhone 深度精度差，地面会闪 */
   bindPointer(canvas);
-  CTL = new OrbitControls(CAM, canvas); CTL.target.set(3.3, .3, -.6); CTL.enableDamping = true; CTL.enablePan = false;
-  CTL.minDistance = 9; CTL.maxDistance = 52; CTL.minPolarAngle = .45; CTL.maxPolarAngle = 1.2;
+  CTL = new OrbitControls(CAM, canvas); CTL.target.set(3.3, .3, -.6); CTL.enableDamping = true;
+  CTL.minDistance = 9; CTL.maxDistance = 52; CTL.minPolarAngle = .45; CTL.maxPolarAngle = 1.05;
+  /* 照 Hesperides：一指拖=贴着地面挪，双指=捏合缩放+转；鼠标左键挪、右键转、滚轮缩放 */
+  CTL.enablePan = true; CTL.screenSpacePanning = false; CTL.panSpeed = 1;
+  /* 斜着看地，屏幕上下一指对应的地面更长：前后那一截按俯角放大，手指底下那块地大致跟着手走 */
+  { const up0 = CTL._panUp; if (up0) CTL._panUp = function (d, m) { const o = this.object.position, t = this.target, s = (o.y - t.y) / Math.max(1e-3, o.distanceTo(t)); return up0.call(this, d / Math.max(.35, s), m); }; }
+  CTL.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+  CTL.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+  CTL.addEventListener('change', clampTarget);
   /* 低角度太阳：受光面暖，天光偏冷，影子长而淡 */
   HEMI = new THREE.HemisphereLight('#eef3ff', '#c7d3b4', 1.25); S.add(HEMI);
   const sun = SUN = new THREE.DirectionalLight('#ffeccf', 2.7); sun.position.set(-9, 6.5, 3.5); sun.target.position.set(1, 0, 0);
@@ -113,31 +121,87 @@ async function initInner(canvas, moods) {
   await buildWorld();
   flowerRoot = new THREE.Group(); S.add(flowerRoot);
   await yieldUI(); stage = '天色'; setupSky(); applySky(); setInterval(applySky, 60000); setupZones();
-  await yieldUI(); stage = '种的花'; addHybridSp(); loadBeds(); setupPlantUI(); loadVases(); breed();
+  await yieldUI(); stage = '种的花'; addHybridSp(); addSeasonalSp(); loadBeds(); setupPlantUI(); setupPowerUI(); loadVases(); breed();
   addEventListener('resize', resize); resize();
-  flushGlints(); shadowsDirty();
+  flushGlints(); applyPower(); shadowsDirty();
   await yieldUI(); stage = '编着色器'; try { if (R.extensions.has('KHR_parallel_shader_compile')) await R.compileAsync(S, CAM); } catch (e) {}   /* 能并行编的手机上不占主线程 */
   await yieldUI(); stage = '第一次画'; LOOK.render(S, CAM);   /* 先编一遍着色器，进门那一下不卡 */
-  if (Q.has('perf')) window.__G = { R, S, CAM, LOOK };   /* 量性能用：?perf 才挂出来 */
+  if (Q.has('perf')) window.__G = { R, S, CAM, LOOK, CTL };   /* 量性能用：?perf 才挂出来 */
   T.mark('render'); console.log('garden init', JSON.stringify(T.out), 'calls', R.info.render.calls, 'tris', R.info.render.triangles, 'geos', R.info.memory.geometries);
 }
 export function start() {
   started = true; wake(2000); if (!document.hidden) R.setAnimationLoop(loop);
   if (newSprouts) setTimeout(() => toast('盆边冒了一株苗'), 600);
 }
-/* —— 省电：最多 30 帧；没人碰、镜头不飞不晃、不下雨的时候降到 10 帧，
-   花照样晃、波光照样闪、池子的水圈照样散，只是慢一点刷；切到后台整个停。手机 60/120Hz 的 rAF 都按时间取整 —— */
+/* —— 省电：最多 30 帧；切到后台整个停。手机 60/120Hz 的 rAF 都按时间取整。
+   再凉一档：没人碰的时候，刚松手那二十秒 8 帧、再往后 5 帧（花晃、波光、水圈都是慢动作，看不出卡）；
+   下雨 20 帧（以前一直 30）；面板盖着园子时 4 帧；省电档里没人碰就不画，有东西变了才补一帧 —— */
 const PHONE = (() => { try { return matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 600; } catch (e) { return false; } })();
-function PIXEL_RATIO() { return Math.min(PHONE ? 1.25 : 1.5, devicePixelRatio || 1); }
-let started = false, lastT = 0, wakeUntil = 0, dragging = false, lastWindShadow = 0;
+/* 省电档：localStorage diarytown_lowpower，'1' 自己开的、'0' 自己关的（不再自动开）、'a' 自动开的、没有就看手机吃不吃力 */
+const LP_KEY = 'diarytown_lowpower';
+let LP = (() => { try { return localStorage.getItem(LP_KEY) || ''; } catch (e) { return ''; } })();
+if (!LP && !/[?&]perf\b/.test(location.search)) { try { if ((navigator.deviceMemory && navigator.deviceMemory <= 2) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2)) LP = 'a'; } catch (e) {} }
+const lowOn = () => LP === '1' || LP === 'a';
+/* 手机上像素比 1.1（以前 1.25；水彩后期本来就有纸纹和晃动，看不出糊），省电档 0.9 */
+function PIXEL_RATIO() { return Math.min(lowOn() ? (PHONE ? .9 : 1) : (PHONE ? 1.1 : 1.5), devicePixelRatio || 1); }
+let started = false, lastT = 0, wakeUntil = 0, dragging = false, lastWindShadow = 0, lastAct = 0, needFrame = true;
 const camPrev = new THREE.Vector3(), tgtPrev = new THREE.Vector3();
-function wake(ms = 1500) { wakeUntil = Math.max(wakeUntil, performance.now() + ms); }
-function shadowsDirty() { if (R) R.shadowMap.needsUpdate = true; }
+function wake(ms = 1500) { const n = performance.now(); wakeUntil = Math.max(wakeUntil, n + ms); lastAct = n; needFrame = true; }
+function shadowsDirty() { if (R) R.shadowMap.needsUpdate = true; needFrame = true; }
+const sheetOpen = () => !!document.querySelector('.sheet:not([hidden])');
+function idleFps(now) {
+  if (lowOn()) return 0;
+  if (WX === 'wind') return 10;   /* 起风花晃得大，帧太少会一顿一顿 */
+  if (sheetOpen()) return 4;
+  return now - lastAct < 20000 ? 8 : 5;
+}
+function setLow(v) {
+  LP = v; try { localStorage.setItem(LP_KEY, v); } catch (e) {}
+  if (R && LOOK) applyPower();
+}
+/* 省电档：像素比降一档、后期少采几次样、不做 MSAA，波光、水圈、雨溅的小圈收起来，影子贴图 512、起风不跟着重算影子 */
+const GLINT_PTS = [];
+function applyPower() {
+  const low = lowOn();
+  R.setPixelRatio(PIXEL_RATIO()); R.setSize(innerWidth, innerHeight, false); LOOK.setLow(low); LOOK.resize();
+  GLINT_PTS.forEach((p) => { p.visible = !low; p.material.uniforms.sz.value = R.getPixelRatio(); });
+  if (RIPPLES) RIPPLES.forEach((r) => r.visible = !low);
+  HILLS.forEach((h) => h.mist.visible = !low);   /* 山脚那圈雾纱是透明的大环，省电档收起来 */
+  SPLASH.forEach((r) => r.visible = !low && WX === 'rain');
+  const ms = low ? 512 : 1024;
+  if (SUN && SUN.shadow.mapSize.x !== ms) { SUN.shadow.mapSize.set(ms, ms); if (SUN.shadow.map) { SUN.shadow.map.dispose(); SUN.shadow.map = null; } }
+  shadowsDirty(); syncLowBtn();
+}
+/* 自动省电：拖着镜头的时候连着几秒都画不到 20 帧（或者一帧 JS 就要 28ms 以上），就换省电档，提醒一句 */
+const PW = { n: 0, slow: 0 };
+function perfWatch(dt, cost) {
+  if (LP || Q.has('perf') || !dt || dt > 400) return;
+  PW.n++; if (dt > 50 || cost > 28) PW.slow++;
+  if (PW.n >= 90) { const slow = PW.slow > PW.n * .6; PW.n = PW.slow = 0; if (slow) { setLow('a'); toast('手机有点吃力，先换省电模式了（··· 里能关）'); } }
+}
+let lowBtn = null;
+function syncLowBtn() { if (lowBtn) lowBtn.textContent = lowOn() ? '省电模式 · 开' : '省电模式 · 关'; }
+function setupPowerUI() {
+  const menu = document.getElementById('menu'); if (!menu) return;
+  lowBtn = document.createElement('button'); lowBtn.className = 'go ghost'; lowBtn.id = 'mLow';
+  lowBtn.onclick = () => { setLow(lowOn() ? '0' : '1'); toast(lowOn() ? '省电模式开了：画得省一点，手机凉一点' : '省电模式关了'); };
+  const before = document.getElementById('mClear'); if (before) menu.insertBefore(lowBtn, before); else menu.appendChild(lowBtn);
+  syncLowBtn();
+}
+/* 挪镜头的边：园子、店、田、村子、池子都在里面，再往外就是海，拖不出去；相机跟着平移同样一截，不跳 */
+const PAN_BOX = { x0: -5, x1: 14.5, z0: -10, z1: 5.5 }, clampD = new THREE.Vector3();
+function clampTarget() {
+  if (fly || !CTL) return;
+  const t = CTL.target, x = Math.min(PAN_BOX.x1, Math.max(PAN_BOX.x0, t.x)), z = Math.min(PAN_BOX.z1, Math.max(PAN_BOX.z0, t.z));
+  if (x === t.x && z === t.z) return;
+  clampD.set(x - t.x, 0, z - t.z); t.add(clampD); CAM.position.add(clampD);
+}
 function loop(now) {
-  const busy = now < wakeUntil || fly || dragging || (RAIN && RAIN.visible);
-  if (lastT && now - lastT < (busy ? 1000 / 30 : 100) - 3) return;
-  const steps = lastT ? Math.min(4, Math.max(1, Math.round((now - lastT) / (1000 / 60)))) : 1;   /* 阻尼照 60 帧的手感走 */
-  lastT = now; tick(steps);
+  const busy = now < wakeUntil || fly || dragging, fps = busy ? 30 : RAIN && RAIN.visible ? (lowOn() ? 12 : 20) : idleFps(now);
+  if (fps ? lastT && now - lastT < 1000 / fps - 3 : !needFrame) return;
+  const dt = lastT ? now - lastT : 0, steps = lastT ? Math.min(4, Math.max(1, Math.round(dt / (1000 / 60)))) : 1;   /* 阻尼照 60 帧的手感走 */
+  lastT = now; needFrame = false;
+  const t0 = performance.now(); tick(steps); if (busy) perfWatch(dt, performance.now() - t0);
 }
 document.addEventListener('visibilitychange', () => {
   if (!started || !R) return;
@@ -145,7 +209,7 @@ document.addEventListener('visibilitychange', () => {
   else { lastT = 0; wake(1000); R.setAnimationLoop(loop); }
 });
 function resize() {
-  const w = innerWidth, h = innerHeight; R.setSize(w, h, false); LOOK.resize();
+  const w = innerWidth, h = innerHeight; R.setSize(w, h, false); LOOK.resize(); needFrame = true;
   CAM.aspect = w / h; CAM.updateProjectionMatrix();
   if (!away) CTL.target.copy(HOME_T); const d = w < h ? 36 : 26, dir = (w < h ? new THREE.Vector3(-.82, .86, .42) : new THREE.Vector3(-.55, .82, .62)).normalize();
   HOME = { t: CTL.target.clone(), d, dir };
@@ -160,14 +224,14 @@ function tick(steps = 1) {
   const t = clock.getElapsedTime();
   const amp = WX === 'wind' ? .16 : .045, sp = WX === 'wind' ? 2.6 : 1.2;
   for (const f of flowers) f.userData.sway.rotation.z = Math.sin(t * sp + f.userData.ph) * amp + (WX === 'wind' ? .06 : 0);
-  if (RAIN && RAIN.visible) { const a = RAIN.geometry.attributes.position, n = a.count / 2; for (let i = 0; i < n; i++) { let y = a.getY(i * 2) - .36; if (y < 0) y += 9; a.setY(i * 2, y); a.setY(i * 2 + 1, y - .6); a.setX(i * 2 + 1, a.getX(i * 2) - .1); } a.needsUpdate = true; SPLASH.forEach((r) => { const k = (t * .9 + r.userData.ph) % 1; r.scale.setScalar(.4 + k * 2.2); r.material.opacity = .85 * (1 - k); }); }
+  if (RAIN && RAIN.visible) { RAIN.material.uniforms.uT.value = t; SPLASH.forEach((r) => r.material.uniforms.uT.value = t); }
   for (const m of GLINTS) m.uniforms.t.value = t;
   if (RIPPLES) RIPPLES.forEach((r, i) => { const k = (t * .35 + i * .5) % 1; r.scale.setScalar(.3 + k * .9); r.material.opacity = .45 * (1 - k); });
   if (fly) { const k = Math.min(1, (performance.now() - fly.t0) / 1300), e = ease(k); CTL.target.lerpVectors(fly.a, fly.b, e); CAM.position.lerpVectors(fly.pa, fly.pb, e); if (k >= 1) { const f = fly; fly = null; f.after && f.after(); } }
   for (let i = 0; i < steps; i++) CTL.update();
   /* 松手以后阻尼还在滑：镜头还在动就继续 30 帧 */
   if (CAM.position.distanceToSquared(camPrev) > 1e-8 || CTL.target.distanceToSquared(tgtPrev) > 1e-8) { wake(250); camPrev.copy(CAM.position); tgtPrev.copy(CTL.target); }
-  if (WX === 'wind' && t - lastWindShadow > .5) { lastWindShadow = t; shadowsDirty(); }   /* 起风时花晃得大，影子一秒跟两回 */
+  if (WX === 'wind' && !lowOn() && t - lastWindShadow > 1) { lastWindShadow = t; shadowsDirty(); }   /* 起风时花晃得大，影子一秒跟一回（省电档不跟） */
   LOOK.render(S, CAM);
 }
 let RIPPLES = null;
@@ -186,7 +250,7 @@ function flushGlints(color = '#fffaf0') {
   const m = new THREE.ShaderMaterial({ uniforms: { t: { value: 0 }, c: { value: new THREE.Color(color) }, sz: { value: R.getPixelRatio() } }, transparent: true, depthWrite: false,
     vertexShader: 'attribute float ph, psz; uniform float t, sz; varying float a; void main(){ float s = sin(t * (.65 + fract(ph) * .8) + ph); a = pow(max(s, 0.), 5.); vec4 mv = modelViewMatrix * vec4(position, 1.); gl_PointSize = psz * sz * (.4 + a) * (30. / -mv.z); gl_Position = projectionMatrix * mv; }',
     fragmentShader: 'uniform vec3 c; varying float a; void main(){ vec2 d = gl_PointCoord - .5; float r = abs(d.x) + abs(d.y); float k = smoothstep(.5, .0, r) + smoothstep(.06, .0, abs(d.y)) * smoothstep(.5, .1, abs(d.x)) * .6; gl_FragColor = vec4(c, min(.55, k * a * .9)); }' });
-  const p = new THREE.Points(g, m); p.frustumCulled = false; p.renderOrder = 3; S.add(p); GLINTS.push(m);
+  const p = new THREE.Points(g, m); p.frustumCulled = false; p.renderOrder = 3; S.add(p); GLINTS.push(m); GLINT_PTS.push(p);
   GLINT_BUF.pos = GLINT_BUF.ph = GLINT_BUF.sz = null;
 }
 /* 软一点的草和花穗：草是几片弯弯的细叶，薰衣草和高花是一根细茎上一串越往上越小的小花球，没有锥子 */
@@ -204,7 +268,7 @@ function bladeTuft(h = .17, n = 4) {
 }
 function floretSpike(h, r0, n) {
   const parts = [nonIdx(new THREE.CylinderGeometry(.005, .007, h * .62, 4).translate(0, h * .31, 0))];
-  for (let i = 0; i < n; i++) { const t = i / (n - 1), r = r0 * (1 - t * .6); const f = new THREE.IcosahedronGeometry(r, 0); f.translate(Math.sin(i * 2.4) * r * .35, h * (.4 + t * .6), Math.cos(i * 2.4) * r * .35); parts.push(nonIdx(f)); }
+  for (let i = 0; i < n; i++) { const t = i / (n - 1), r = r0 * (1 - t * .6); const f = new THREE.OctahedronGeometry(r, 0); f.translate(Math.sin(i * 2.4) * r * .35, h * (.4 + t * .6), Math.cos(i * 2.4) * r * .35); parts.push(nonIdx(f)); }
   return mergeGeometries(parts);
 }
 /* 岛上三块平地 [cx, cz, 半宽, 半深]：园子、侧门外的田、门外小路边的小村 */
@@ -218,21 +282,21 @@ function forms() {
   if (FORMS) return FORMS;
   const NI = nonIdx, M = mergeGeometries;
   const stem = (h, lean = 0) => NI(new THREE.CylinderGeometry(.005, .007, h, 4).translate(0, h / 2, 0).rotateZ(lean));
-  const dots = (n, r, spread, y, flat = .4, seed = 1) => { let k = seed * 97; const R = () => ((k = (k * 9301 + 49297) % 233280) / 233280); const a = []; for (let i = 0; i < n; i++) { const t = R() * 6.28, rr = Math.sqrt(R()) * spread, g = new THREE.IcosahedronGeometry(r * (.8 + R() * .4), 0); g.translate(Math.cos(t) * rr, y + (1 - rr / spread) * spread * flat, Math.sin(t) * rr); a.push(NI(g)); } return M(a); };
+  const dots = (n, r, spread, y, flat = .4, seed = 1) => { let k = seed * 97; const R = () => ((k = (k * 9301 + 49297) % 233280) / 233280); const a = []; for (let i = 0; i < n; i++) { const t = R() * 6.28, rr = Math.sqrt(R()) * spread, g = new THREE.OctahedronGeometry(r * (.8 + R() * .4), 0); g.translate(Math.cos(t) * rr, y + (1 - rr / spread) * spread * flat, Math.sin(t) * rr); a.push(NI(g)); } return M(a); };
   const disc = (r, h) => { const g = NI(new THREE.CylinderGeometry(r, r * .85, .012, 12)); g.rotateX(-.25); g.translate(0, h, 0); return g; };
   const cup = (r, h, sy = .72) => { const g = NI(new THREE.IcosahedronGeometry(r, 1)); g.scale(1, sy, 1); g.translate(0, h, 0); return g; };
   const tulipCup = (h) => { const pts = [[0, 0], [.03, .01], [.045, .04], [.042, .075], [.034, .095]].map(([x, y]) => new THREE.Vector2(x, y)); const g = NI(new THREE.LatheGeometry(pts, 7)); g.translate(0, h, 0); return g; };
   const blade = (h) => { const g = bladeTuft(h, 2); return g; };
   FORMS = {
-    daisy: { parts: [[stem(.24), 'stem'], [disc(.05, .24), 'c'], [NI(new THREE.SphereGeometry(.018, 6, 4).translate(0, .25, 0)), 'center']], w: .9 },
-    cosmos: { parts: [[stem(.34, .08), 'stem'], [disc(.055, .34).translate(-.014, 0, 0), 'c'], [NI(new THREE.SphereGeometry(.016, 6, 4).translate(-.014, .35, 0)), 'center']], w: .9 },
+    daisy: { parts: [[stem(.24), 'stem'], [disc(.05, .24), 'c'], [NI(new THREE.OctahedronGeometry(.018, 0).translate(0, .25, 0)), 'center']], w: .9 },
+    cosmos: { parts: [[stem(.34, .08), 'stem'], [disc(.055, .34).translate(-.014, 0, 0), 'c'], [NI(new THREE.OctahedronGeometry(.016, 0).translate(-.014, .35, 0)), 'center']], w: .9 },
     rose: { parts: [[stem(.2), 'stem'], [cup(.055, .22), 'c'], [cup(.035, .245, .8), 'cD']], w: 1 },
     peony: { parts: [[stem(.18), 'stem'], [cup(.085, .2, .66), 'c'], [cup(.05, .235, .8), 'cL']], w: 1.1 },
     mound: { parts: [[NI(new THREE.IcosahedronGeometry(.12, 1).scale(1, .7, 1).translate(0, .08, 0)), 'leaf'], [dots(14, .03, .1, .14, .35, 3), 'c'], [dots(6, .028, .08, .17, .3, 7), 'cL']], w: 1.3 },
     tulip: { parts: [[stem(.22), 'stem'], [blade(.16), 'leaf'], [tulipCup(.21), 'c']], w: .8 },
     umbel: { parts: [[stem(.3), 'stem'], [dots(10, .016, .06, .3, .12, 5), 'c']], w: .9 },
     ground: { parts: [[NI(new THREE.IcosahedronGeometry(.1, 1).scale(1.3, .35, 1.3).translate(0, .025, 0)), 'leaf'], [dots(14, .016, .12, .05, .2, 9), 'c']], w: 1.4 },
-    airy: { parts: [[M([stem(.62, .05), stem(.38, -.35).translate(0, .22, 0), stem(.3, .4).translate(0, .3, 0)]), 'stem'], [M([NI(new THREE.SphereGeometry(.018, 6, 4).translate(-.03, .62, 0)), NI(new THREE.SphereGeometry(.016, 6, 4).translate(.13, .55, 0)), NI(new THREE.SphereGeometry(.016, 6, 4).translate(-.12, .56, 0))]), 'c']], w: .7 },
+    airy: { parts: [[M([stem(.62, .05), stem(.38, -.35).translate(0, .22, 0), stem(.3, .4).translate(0, .3, 0)]), 'stem'], [M([NI(new THREE.OctahedronGeometry(.018, 0).translate(-.03, .62, 0)), NI(new THREE.OctahedronGeometry(.016, 0).translate(.13, .55, 0)), NI(new THREE.OctahedronGeometry(.016, 0).translate(-.12, .56, 0))]), 'c']], w: .7 },
     spike: { parts: [[floretSpike(.36, .024, 7), 'c']], w: 1 },
     /* 南法花境的骨架和前景：窄锥形柏、修剪的圆球、标准型柠檬树；银叶垫、羽毛草、迷迭香 */
     cypress: { parts: [[M([NI(new THREE.IcosahedronGeometry(.2, 1).translate(0, .25, 0)), NI(new THREE.IcosahedronGeometry(.15, 1).translate(0, .5, 0))]), 'cyB'], [NI(new THREE.IcosahedronGeometry(.1, 1).translate(0, .72, 0)), 'cyT']], w: 1 },
@@ -419,6 +483,13 @@ function addHybridSp() {
     PLANT_SP.push({ id: h.id, zh: h.name, c: [P.hex], kind, hybrid: true });
   }
 }
+/* 季节花（hybrid.js 里带 season 的底子）也能种：手上有种子就能种 */
+function addSeasonalSp() {
+  for (const s of Object.values(Hy.SPECIES)) {
+    if (!s.season || PLANT_SP.some((x) => x.id === s.id)) continue;
+    PLANT_SP.push({ id: s.id, zh: s.zh, c: [s.c], kind: 'cosmos', seasonal: true });
+  }
+}
 
 /* —— 点哪儿飞哪儿，照记忆小镇的 flyTo：目标和机位一起缓动 —— */
 const HOME_T = new THREE.Vector3(3.3, .3, -.6);
@@ -447,19 +518,7 @@ function setupZones() {
   backBtn.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 40px);z-index:6;padding:7px 18px;border-radius:20px;border:0;background:rgba(255,252,246,.92);color:#5b4a44;font:inherit;font-size:13px;letter-spacing:.2em;box-shadow:0 4px 14px -8px rgba(80,50,40,.35)';
   backBtn.onclick = goHome; document.body.appendChild(backBtn);
 }
-/* 远山：三层矮矮的山影立在岛后面，越远越淡、化进背景（简化版，参考 town/scroll.js 的远山） */
 const HILLS = [];
-function farHills() {
-  let sd = 11; const r = () => ((sd = (sd * 9301 + 49297) % 233280) / 233280);
-  [[-13, 3.8, .35], [-16.5, 5.2, .5], [-21, 7, .66]].forEach(([z, h, fade], li) => {
-    const sh = new THREE.Shape(); sh.moveTo(-90, -2); let x = -90;
-    while (x < 90) { const w = 8 + r() * 14; sh.lineTo(x + w * .45, h * (.45 + r() * .55)); x += w; sh.lineTo(x, h * (.15 + r() * .25)); }
-    sh.lineTo(90, -2); sh.closePath();
-    const m = new THREE.MeshBasicMaterial({ color: '#9fb2b8', fog: false, transparent: true, opacity: 1, depthWrite: false });
-    m.userData.fade = fade; const mesh = new THREE.Mesh(new THREE.ShapeGeometry(sh, 2), m); mesh.position.set(-z + 4, -.6, -6 + li * 5); mesh.rotation.y = -Math.PI / 2 + .25; mesh.renderOrder = -1; mesh.userData.keep = true; mesh.userData.noLine = true;
-    S.add(mesh); HILLS.push(mesh);
-  });
-}
 /* 小村：门外小路两边几户人家，借小镇法式的房子，缩小当邻居 */
 function village(world) {
   const spots = [[5.2, -6.4, Math.PI / 2 + .1, 'paris'], [6.9, -8.7, Math.PI / 2 - .15, 'farm'], [9.4, -6.2, -Math.PI / 2 + .2, 'paris'], [10.6, -8.6, -Math.PI / 2, 'farm'], [8.0, -9.6, 0, 'paris']];
@@ -514,15 +573,66 @@ function setupSky() {
   glowM.forEach((m) => m.userData.base = m.emissiveIntensity);
   /* 夜里的灯：点光源只放三盏，手机上便宜 */
   for (const [x, z] of [[GATE.x - 1.15, GATE.z - .75], [POND.x - .75, POND.z - .45], [DECK.x - .6, DECK.z + .7], [FARM_LAMP.x, FARM_LAMP.z]]) { const l = new THREE.PointLight('#ffb468', 0, 2.4, 1.8);   /* 范围收小，拱门的玫瑰夜里别像着火 */ l.position.set(x, .75, z); S.add(l); LAMPS.push(l); }
-  /* 雨：一把细线，落到地上从头再落 */
-  const n = 650, pos = new Float32Array(n * 6);
-  for (let i = 0; i < n; i++) { const x = -6 + rnd() * 18, y = rnd() * 9, z = -6 + rnd() * 13; pos.set([x, y, z, x - .1, y - .6, z], i * 6); }
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  /* 雨点溅在池子和路上的小圈，一圈圈冒出来散掉 */
-  const spots = [...Array(5)].map(() => { const a = rnd() * 6.28, r = rnd() * (POND.r - .1); return [POND.x + Math.cos(a) * r, .15, POND.z + Math.sin(a) * r]; }).concat(PATH_MAIN.getSpacedPoints(9).concat(PATH_DECK.getSpacedPoints(6)).map((p) => [p.x, .14, p.z]));
-  const ringG = new THREE.RingGeometry(.06, .075, 20);
-  spots.forEach(([x, y, z], i) => { const r = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false })); r.rotation.x = -Math.PI / 2; r.position.set(x, y, z); r.userData.ph = rnd(); r.visible = false; S.add(r); SPLASH.push(r); });
-  RAIN = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#e4edf7', transparent: true, opacity: .8, depthWrite: false, fog: false })); RAIN.visible = false; RAIN.frustumCulled = false; S.add(RAIN);
+  /* 雨：短、细、淡的蓝灰小划痕，长短快慢各不一样，带一点斜和一点点风；
+     凑到镜头跟前的和太远的都淡掉。位置全在 shader 里按时间算，每帧只改一个 uT，不再 CPU 挪 650 根线 */
+  const n = 760, pos = new Float32Array(n * 6), end = new Float32Array(n * 2), rr = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) { const x = -6 + rnd() * 18, y = rnd() * 9, z = -6 + rnd() * 13, a = rnd(), b = rnd(); pos.set([x, y, z, x, y, z], i * 6); end.set([0, 1], i * 2); rr.set([a, b, a, b], i * 4); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1)); g.setAttribute('aR', new THREE.BufferAttribute(rr, 2));
+  RAIN = new THREE.LineSegments(g, new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 }, uCol: { value: new THREE.Color('#93a4b8') }, uA: { value: .3 }, uWind: { value: new THREE.Vector2(.13, .05) } },
+    vertexShader: `uniform float uT; uniform vec2 uWind; attribute float aEnd; attribute vec2 aR; varying float vA;
+      void main(){
+        float sp = 5.2 * (.7 + .6 * aR.x), len = .22 * (.55 + .9 * aR.y);
+        float y = mod(position.y - uT * sp, 9.);
+        vec2 w = uWind * (.8 + .4 * aR.y) + .025 * vec2(sin(uT * .6 + position.z), cos(uT * .45 + position.x));
+        vec3 p = vec3(position.x + w.x * y, y, position.z + w.y * y) - vec3(w.x, 1., w.y) * len * aEnd;
+        float d = distance(p, cameraPosition);
+        vA = mix(.3, 1., aEnd) * smoothstep(1.2, 4.5, d) * (1. - .55 * smoothstep(30., 70., d)) * smoothstep(0., .4, y) * (1. - smoothstep(7.8, 9., y)) * (.75 + .25 * aR.x);
+        gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.);
+      }`,
+    fragmentShader: `uniform vec3 uCol; uniform float uA; varying float vA;
+      void main(){ gl_FragColor = vec4(uCol, uA * vA);
+      #include <colorspace_fragment>
+      }`,
+    transparent: true, depthWrite: false,
+  })); RAIN.visible = false; RAIN.frustumCulled = false; S.add(RAIN);
+  /* 雨点溅起来的小圈：池子里和路上，冒一个小点再散成一圈淡掉；每一圈落的地方每回挪一点，有的回合空着不落。
+     全部并成一张网格、一次画完 */
+  const spots = [...Array(14)].map(() => { const a = rnd() * 6.28, r = Math.sqrt(rnd()) * (POND.r - .12); return [POND.x + Math.cos(a) * r, .15, POND.z + Math.sin(a) * r, 1]; })
+    .concat(PATH_MAIN.getSpacedPoints(20).concat(PATH_DECK.getSpacedPoints(10), PATH_POND.getSpacedPoints(4)).map((p) => [p.x, .14, p.z, 0]));
+  const m = spots.length, sp = new Float32Array(m * 12), sc = new Float32Array(m * 12), sq = new Float32Array(m * 16), idx = [];
+  spots.forEach(([x, y, z, pond], i) => {
+    const ph = rnd(), rate = .7 + rnd() * .6;
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([u, v], j) => { sp.set([u, v, 0], i * 12 + j * 3); sc.set([x, y, z], i * 12 + j * 3); sq.set([ph, rate, pond ? .1 : .06, pond], i * 16 + j * 4); });
+    idx.push(i * 4, i * 4 + 2, i * 4 + 1, i * 4, i * 4 + 3, i * 4 + 2);
+  });
+  const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('aC', new THREE.BufferAttribute(sc, 3)); sg.setAttribute('aP', new THREE.BufferAttribute(sq, 4)); sg.setIndex(idx);
+  const splash = new THREE.Mesh(sg, new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 }, uCol: { value: new THREE.Color('#dfe7f0') }, uA: { value: .7 } },
+    vertexShader: `uniform float uT; attribute vec3 aC; attribute vec4 aP; varying vec2 vQ; varying float vK; varying float vOn; varying float vPond;
+      float h(float n){ return fract(sin(n) * 43758.5453); }
+      void main(){
+        float c = uT * aP.y + aP.x, id = floor(c + aC.x * 7.13);
+        vK = fract(c); vPond = aP.w; vOn = step(.35, h(id * 1.7 + aC.z * 3.1));
+        vec2 j = (vec2(h(id + aC.x), h(id * 2.3 + aC.z)) - .5) * 2. * aP.z;
+        float R = aP.w > .5 ? .2 : .13;
+        vQ = position.xy * R;
+        vec3 p = aC + vec3(j.x + vQ.x, 0., j.y + vQ.y);
+        gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.);
+      }`,
+    fragmentShader: `uniform vec3 uCol; uniform float uA; varying vec2 vQ; varying float vK; varying float vOn; varying float vPond;
+      void main(){
+        float d = length(vQ), R = vPond > .5 ? .18 : .11, r = .015 + vK * R, w = .011 + .007 * vK;
+        float ring = 1. - smoothstep(0., w, abs(d - r));
+        float ring2 = vPond * .6 * (1. - smoothstep(0., w, abs(d - r * .55))) * step(.15, vK);
+        float dt = (1. - smoothstep(.0, .18, vK)) * (1. - smoothstep(.016, .028, d));
+        float a = ((ring + ring2) * pow(1. - vK, 1.6) + dt) * vOn * uA;
+        if (a < .01) discard;
+        gl_FragColor = vec4(uCol, a);
+      #include <colorspace_fragment>
+      }`,
+    transparent: true, depthWrite: false,
+  })); splash.visible = false; splash.frustumCulled = false; splash.userData.noLine = true; S.add(splash); SPLASH.push(splash);
 }
 function weatherOf(list) {
   if (Q.has('w')) return Q.get('w');
@@ -553,13 +663,15 @@ export function applySky() {
   if (OUTER_M) OUTER_M.color.copy(gr);
   MEADOW.forEach((m) => m.color.copy(m.userData.base).lerp(gr, k === 'night' ? .85 : 0));   /* 外面那几块草地跟着天色暗下去，夜里别一块块发白 */
   LOOK.setWarm(warm);
-  HILLS.forEach((h) => h.material.color.set(k === 'night' ? '#3c4366' : k === 'dusk' ? '#a9a7c8' : '#88a7bb').lerp(bg, h.material.userData.fade));   /* 远山跟着天色走，越远越蓝越淡 */
-  LAMPS.forEach((l) => l.intensity = t.lamp);
+  HILLS.forEach((h) => h.setPhase(k, S.fog.color, WX));
+  LAMPS.forEach((l) => { l.intensity = t.lamp; l.visible = t.lamp > 0; });   /* 白天灯不亮就整盏关掉：着色器里少算四盏点光（换时辰时重编一次） */
   if (k + WX !== skyKey) { skyKey = k + WX; shadowsDirty(); }   /* 太阳换了位置才重算影子 */
   glowM.forEach((m) => m.emissiveIntensity = m.userData.base * t.glow);
   FARM_SOIL.forEach((m, i) => { m.emissive = m.emissive || new THREE.Color(); m.emissive.set('#5a3a24'); m.emissiveIntensity = (k === 'night' ? .5 : k === 'dusk' ? .12 : 0) * (i === 3 ? .3 : 1); });
-  if (RAIN) { RAIN.visible = WX === 'rain'; RAIN.material.color.set(k === 'night' ? '#b3bfe0' : '#e4edf7'); }
-  SPLASH.forEach((r) => r.visible = WX === 'rain');
+  if (RAIN) { RAIN.visible = WX === 'rain'; RAIN.material.uniforms.uCol.value.set(k === 'night' ? '#a3b0d4' : k === 'dusk' ? '#c3c6da' : '#c9d5e2'); RAIN.material.uniforms.uA.value = k === 'night' ? .3 : .35; }
+  SPLASH.forEach((r) => r.material.uniforms.uCol.value.set(k === 'night' ? '#aab5d6' : '#e6edf4'));
+  SPLASH.forEach((r) => r.visible = WX === 'rain' && !lowOn());
+  needFrame = true;
 }
 const wash = (c, o = {}) => mat('#ffffff', { map: washTex(c, { blots: o.blots || 30, seed: o.seed || 3, rep: o.rep || [2, 2] }) });
 const at = (o, x, y, z) => { o.position.set(x, y, z); return o; };
@@ -677,7 +789,7 @@ async function buildWorld() {
   HAT = land.userData.heightAt; OUTER_M = land.material; land.userData.keep = true; world.add(land);
   T.mark('b-island'); await yieldUI();
   const sea = LAND.water(90); sea.position.y = -.5; sea.userData.keep = true; world.add(sea);
-  farHills();
+  HILLS.push(buildFarHills(THREE, { cx: 4.5, cz: -2.5, gradientMap: mat('#ffffff').gradientMap })); S.add(HILLS[0].mesh);
   { const pts = []; let k = 17; const r2 = () => ((k = (k * 9301 + 49297) % 233280) / 233280); for (let i = 0; pts.length < 900 && i < 12000; i++) { const a = r2() * 6.28, d = 6 + Math.sqrt(r2()) * 16, x = 2 + Math.cos(a) * d, z = Math.sin(a) * d; if (HAT(x, z) < -.4) pts.push(x, -.47, z); } glints(pts, 8); }
   T.mark('b-sea'); await yieldUI();
   village(world); T.mark('b-village'); await yieldUI();
@@ -752,6 +864,14 @@ async function buildWorld() {
     }
   };
   slabs(PATH_MAIN, .42, .34); slabs(PATH_DECK, .4, .28);
+  /* 去花架那条路两头接实：店那头顺着路的方向伸进石板台子底下，花架那头伸进木平台底下，
+     砖沿一路包到台子边、平台边才停，不在草里断开；随机数用完还回去，别把后面的花草排布打乱 */
+  { const s0 = seed, em = mat('#b49a80'), ext = (a, b, skip0) => { const c = new THREE.LineCurve3(a, b); gravel(c, .28); const n = Math.max(1, Math.round(a.distanceTo(b) / .12)), tg = c.getTangentAt(0), nx = -tg.z, nz = tg.x, ry = Math.atan2(tg.x, tg.z);
+      for (let i = skip0 ? 1 : 0; i <= (skip0 ? n : n - 1); i++) { const p = c.getPointAt(i / n); for (const sd of [-1, 1]) { const ex = p.x + nx * .3 * sd, ez = p.z + nz * .3 * sd; if (inShop(ex, ez, .04) || nearDeck(ex, ez, .03)) continue; const br = new THREE.Mesh(new THREE.BoxGeometry(.05, .045, .115), em); br.position.set(ex, .115, ez); br.rotation.y = ry; br.userData.lineW = .003; world.add(br); } } };
+    const p0 = PATH_DECK.getPointAt(0), t0 = PATH_DECK.getTangentAt(0), p1 = PATH_DECK.getPointAt(1), t1 = PATH_DECK.getTangentAt(1);
+    ext(p0.clone().addScaledVector(t0, -.4), p0, false); ext(p1, p1.clone().addScaledVector(t1, .45), true);
+    const st = new THREE.Mesh(flagGeo(.42, .36, 6), mat(STONE_C[1])); st.position.set(p0.x - t0.x * .2, .1, p0.z - t0.z * .2); st.rotation.y = Math.atan2(t0.x, t0.z); st.userData.lineW = .005; world.add(st);
+    seed = s0; }
   PATH_POND.getSpacedPoints(3).forEach((p, i) => { const st = new THREE.Mesh(flagGeo(.3 + rnd() * .08, .24 + rnd() * .06, 6 + (i % 2)), mat(STONE_C[i % 4])); st.position.set(p.x, .095, p.z); st.rotation.y = rnd() * 6; st.userData.lineW = .005; world.add(st); });
   if (LANDING.r) { const L = LANDING, disc = new THREE.Mesh(new THREE.CylinderGeometry(L.r, L.r, .02, 40), mat('#e9e1d2', { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })); disc.position.set(L.x, .1, L.z); disc.userData.noLine = true; disc.receiveShadow = true; world.add(disc);
     const em = mat('#b49a80'), nb = 30; for (let i = 0; i < nb; i++) { const a = i / nb * 6.28, b = new THREE.Mesh(new THREE.BoxGeometry(.05, .045, L.r * 6.28 / nb * .92), em); b.position.set(L.x + Math.cos(a) * (L.r + .02), .115, L.z + Math.sin(a) * (L.r + .02)); b.rotation.y = -a; b.userData.lineW = .003; world.add(b); }
@@ -908,7 +1028,7 @@ function fillBeds() {
   const spike = floretSpike(.36, .024, 7);
   const tall = floretSpike(.58, .036, 9);
   const ball = new THREE.IcosahedronGeometry(.1, 1);
-  const dot = new THREE.IcosahedronGeometry(.038, 0);
+  const dot = new THREE.OctahedronGeometry(.038, 0);
   const bush = new THREE.IcosahedronGeometry(.14, 1);
   const tuft = bladeTuft();
   const lists = new Map();
@@ -969,7 +1089,15 @@ function fillBeds() {
   }
   /* 草坪上零星草丛，不碰花境 */
   for (let i = 0; i < 360; i++) { const x = (rnd() - .5) * 8.6, z = (rnd() - .5) * 7.8; put(tuft, G.grassD, x, z, .09, .5 + rnd() * .7); }
-  for (const { geo, color, m } of lists.values()) { const im = new THREE.InstancedMesh(geo, geo === tuft ? mat(color, { side: THREE.DoubleSide }) : mat(color), m.length); m.forEach((mm, i) => im.setMatrixAt(i, mm)); im.castShadow = geo !== tuft; im.receiveShadow = true; S.add(im); }
+  /* 同一种形不分颜色并成一个 InstancedMesh，颜色走每个实例自己的 instanceColor（白材质 × 实例色 = 原来的颜色），draw call 少一百多个 */
+  const byGeo = new Map();
+  for (const { geo, color, m } of lists.values()) { if (!byGeo.has(geo)) byGeo.set(geo, []); byGeo.get(geo).push({ color, m }); }
+  const ic = new THREE.Color();
+  for (const [geo, arr] of byGeo) {
+    const n = arr.reduce((k, a) => k + a.m.length, 0), im = new THREE.InstancedMesh(geo, geo === tuft ? mat('#ffffff', { side: THREE.DoubleSide }) : mat('#ffffff'), n);
+    let i = 0; for (const { color, m } of arr) { ic.set(color); for (const mm of m) { im.setMatrixAt(i, mm); im.setColorAt(i, ic); i++; } }
+    im.castShadow = geo !== tuft; im.receiveShadow = true; S.add(im);
+  }
 }
 
 // ---------- 花：小苗 → 抽枝 → 开花 → 枯萎 ----------
@@ -989,6 +1117,7 @@ function makeFlower(f) {
   /* 杂交花按基因：颜色、瓣数、重瓣、攒球、花头大小（Hy.paramsOf） */
   const P = f.hybrid || (f.species && !Hy.SPECIES[f.species]) ? Hy.paramsOf(Hy.genesOf(f)) : null;
   const ids = f.moods && f.moods.length ? f.moods : [f.mood], cs = P ? [vivid(P.hex)] : ids.map((id) => id === 'calm' ? '#7fa8f0' : vivid(COLORS[id] || '#e98aa4'));
+  if (!P && f.species && Hy.SPECIES[f.species] && Hy.SPECIES[f.species].rare) cs[0] = vivid(Hy.colorsOf(f)[0]);   /* 心情抽到少见的那种：打头那个色换成它的（Hy.colorsOf），常见的和老花照旧 */
   const st = stageOf(f), wild = !!f.wild, dead = st === 3, calm = P ? P.cluster : ids[0] === 'calm' && !wild;
   const fade = (c) => dead ? '#' + new THREE.Color(c).lerp(new THREE.Color('#a88a68'), .55).getHexString() : c;
   const leafM = mat(dead ? '#a8925e' : C.leaf, { side: THREE.DoubleSide });
@@ -1060,12 +1189,24 @@ function bindPointer(el) {
   for (const ev of ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove']) el.addEventListener(ev, () => wake(), { passive: true });
   let drag = null, down = null; const v = new THREE.Vector2(), p = new THREE.Vector3();
   const pick = (e) => { const r = el.getBoundingClientRect(); v.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(v, CAM); };
-  let press = null;
-  const cancelPress = () => { if (press) { clearTimeout(press); press = null; } };
+  let press = null, cand = null; const ptrs = new Set();
+  const cancelPress = () => { if (press) { clearTimeout(press); press = null; } cand = null; };
+  /* 以前手指一落在花上就抓花、把镜头关掉，园子里花一多，一指拖几乎全被花吃了。
+     现在落在花上先当挪镜头，按住不动 .35 秒才拎起来；点一下照旧看那天；第二根手指一落下就只管镜头 */
+  const endDrag = () => { if (!drag) return; drag.o.position.y = .09; drag = null; CTL.enabled = true; dragging = false; shadowsDirty(); };
+  for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault());   /* iOS：双指别把整页放大，交给镜头 */
+  el.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); cancelPress(); endDrag(); down = null; });
   el.addEventListener('pointerdown', (e) => {
+    if (e.isPrimary) { ptrs.clear(); cancelPress(); endDrag(); }   /* 新的一下：上一下要是漏了 pointerup（iOS 偶尔吞），别让镜头一直关着 */
+    ptrs.add(e.pointerId);
+    if (ptrs.size > 1) { cancelPress(); down = null; return; }
     down = { x: e.clientX, y: e.clientY }; pick(e);
     const h = ray.intersectObjects(flowers.map((f) => f.userData.hit))[0];
-    if (h) { drag = { o: h.object.userData.root, moved: false }; dragging = true; CTL.enabled = false; el.setPointerCapture(e.pointerId); return; }
+    if (h) {
+      const o = h.object.userData.root, id = e.pointerId; cand = o;
+      press = setTimeout(() => { press = null; if (cand !== o || !ptrs.has(id)) return; cand = null; drag = { o, moved: false }; dragging = true; CTL.enabled = false; o.position.y = .17; shadowsDirty(); wake(); try { el.setPointerCapture(id); } catch (err) {} }, 350);
+      return;
+    }
     const hv = ray.intersectObjects(VASE_HITS)[0];   /* 长按园子里的一盆插花收回去，腾出花位 */
     if (hv) { const v = hv.object.userData.vase; press = setTimeout(() => { press = null; down = null; takeVase(v); }, 650); return; }
     const hc = ray.intersectObjects(CLUMP_HITS)[0];
@@ -1079,14 +1220,16 @@ function bindPointer(el) {
     if (ray.ray.intersectPlane(groundPlane, p) && okSpot(p.x, p.z)) { drag.o.position.set(p.x, .17, p.z); shadowsDirty(); }
   });
   el.addEventListener('pointerup', (e) => {
+    ptrs.delete(e.pointerId);
     if (drag) {
-      const o = drag.o, f = o.userData.f; o.position.y = .09; CTL.enabled = true; dragging = false; shadowsDirty();
-      if (drag.moved) { f.x = o.position.x; f.z = o.position.z; dispatchEvent(new CustomEvent('flower-moved', { detail: f })); }
+      const o = drag.o, f = o.userData.f, moved = drag.moved; endDrag();
+      if (moved) { f.x = o.position.x; f.z = o.position.z; dispatchEvent(new CustomEvent('flower-moved', { detail: f })); }
       else dispatchEvent(new CustomEvent('flower-pick', { detail: f }));
-      drag = null; return;
+      return;
     }
-    cancelPress();
+    const tapped = cand; cancelPress();
     if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) {
+      if (tapped) { down = null; dispatchEvent(new CustomEvent('flower-pick', { detail: tapped.userData.f })); return; }
       dispatchEvent(new CustomEvent('flower-none'));
       pick(e);
       if (plantMode) { if (ray.ray.intersectPlane(groundPlane, p)) plantAt(p.x, p.z); down = null; return; }

@@ -162,7 +162,7 @@ async function enter(write) {
     /* 一天一朵花、一份菜：今天已经有花了，这几句夹进那朵花的 more 里，不再种新的 */
     const old = todayFlower(await store.all());
     if (old) { (old.more = old.more || []).push({ at: Date.now(), moods: pick.slice(), text: line.value.trim(), photo }); await store.put(old); }
-    else { await store.put({ id: 'f' + Date.now(), at: Date.now(), mood: pick[0], moods: pick.slice(), text: line.value.trim(), photo, x: 0, z: 1.75 + Math.random() * .3 }); Day.claimDiary(pick); }
+    else { await store.put({ id: 'f' + Date.now(), at: Date.now(), mood: pick[0], moods: pick.slice(), species: Hy.pickForMood(pick[0]), text: line.value.trim(), photo, x: 0, z: 1.75 + Math.random() * .3 }); Day.claimDiary(pick); }   /* 领到哪种花按第一个心情抽，六成常见、各两成少见（Hy.pickForMood），记在 species；老花没这个字段照旧按心情 */
   }
   go(2); R.on = true; R.t0 = performance.now(); requestAnimationFrame(runLoop);
   const G = await gardenP;
@@ -198,7 +198,8 @@ let cur = null;
 addEventListener('flower-pick', (e) => {
   const f = e.detail; cur = f; $('#post').hidden = true; $('#menu').hidden = true;
   const d = new Date(f.at), names = (f.moods || [f.mood]).map((id) => moodOf(id).zh).join(' · ');
-  $('#cDate').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${names}${f.wild ? ' · 路上捡的野花' : ''}`;
+  const rareSp = !f.hybrid && isRare(f.species) ? ' · ' + Hy.nameOf(f.species) + '（少见）' : '';   /* 抽到少见的那种，卡片上报个名 */
+  $('#cDate').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${names}${rareSp}${f.wild ? ' · 路上捡的野花' : ''}`;
   $('#cTxt').textContent = f.wild ? '小螃蟹跑回家路上捡的，没写字。' : [f.text, ...(f.more || []).map((m) => m.text)].join('\n\n');   /* 同一天后来再写的几句跟在后面 */
   const img = $('#cImg'); if (f.photo) { img.src = f.photo; img.hidden = false; } else img.hidden = true;
   $('#cPost').hidden = !!f.wild; $('#card').hidden = false;
@@ -211,18 +212,23 @@ addEventListener('flower-none', () => { $('#card').hidden = true; });
 // ---------- 明信片 ----------
 const PC = { paper: '#f6f1e7', plate: '#ede6d8', ink: '#4a3f3a', soft: '#a39488', line: 'rgba(74,63,58,.28)',
   hand: '"MaoKenTangYuan (beta)","PingFang SC",sans-serif', latin: '"Cormorant Garamond","Noto Serif SC",serif' };
-const STY_NP = ['A:bunch', 'A:hero', 'A:flat', 'B:bunch'], STY_PH = ['A', 'B'];
+const STY_NP = ['A:bunch', 'B:bunch', 'A:hero', 'B:hero', 'A:flat', 'B:flat'], STY_PH = ['A', 'B'];
 let pcI = 0;
 const styOf = (f) => (f.photo ? STY_PH : STY_NP)[pcI % (f.photo ? STY_PH : STY_NP).length];
 /* 这把花：这天一个心情一枝，再配前几天的一两枝，凑三到五枝 */
+/* 日记花带的 species 是底子花，照旧一个心情一枝，领到的那种打头；杂交花才整朵拿 */
+const isRare = (id) => !!(id && Hy.SPECIES[id] && Hy.SPECIES[id].rare);
+const ownSp = (f) => f.genes || (f.species && !Hy.isBase(f.species));
 async function bunchOf(f) {
-  const own = f.species || f.genes ? [f] : (f.moods || [f.mood]).map((m) => ({ mood: m, moods: [m] }));
+  const own = ownSp(f) ? [f] : (f.moods || [f.mood]).map((m, i) => i || !f.species ? { mood: m, moods: [m] } : { mood: m, moods: [m], species: f.species });
   const before = (await store.all()).filter((x) => !x.wild && x.id !== f.id && x.at < f.at).sort((a, b) => b.at - a.at);
   const seen = new Set(own.map((x) => x.species || x.mood)), out = own.slice();
-  for (const x of before) { if (out.length >= Math.max(3, own.length + 2) || out.length >= 5) break; const k = x.species || (x.moods || [x.mood])[0]; if (seen.has(k)) continue; seen.add(k); out.push(x.species || x.genes ? x : { mood: k, moods: [k] }); }
+  for (const x of before) { if (out.length >= Math.max(3, own.length + 2) || out.length >= 5) break; const k = x.species || (x.moods || [x.mood])[0]; if (seen.has(k)) continue; seen.add(k); out.push(ownSp(x) ? x : x.species ? { mood: (x.moods || [x.mood])[0], moods: [(x.moods || [x.mood])[0]], species: x.species } : { mood: k, moods: [k] }); }
   while (out.length < 3) out.push({ ...own[out.length % own.length] });
   return out.slice(0, 5);
 }
+/* 特写那一枝：杂交花整朵；日记花领到哪种就用哪种，只上它那一个色 */
+const heroOf = (f, ms) => ownSp(f) ? f : f.species ? { mood: ms[0].id, moods: [ms[0].id], species: f.species } : { mood: ms[0].id, moods: ms.map((m) => m.id) };
 const seedOf = (f) => [...String(f.id || 'x')].reduce((a, ch) => a * 31 + ch.charCodeAt(0) | 0, 7) & 1023;
 async function drawCard(f, v) {
   const [lay0, kind = 'bunch'] = v.split(':'); v = lay0;
@@ -241,7 +247,7 @@ async function drawCard(f, v) {
     const k = Math.max(IW / pic.width, IH / pic.height); c.drawImage(pic, ix + (IW - pic.width * k) / 2, iy + (IH - pic.height * k) / 2, pic.width * k, pic.height * k); c.restore();
   } else {
     // 没照片：那朵花就是主图，放在一块略深的纸上，像标本卡
-    const list = kind === 'hero' ? [f.species || f.genes ? f : { mood: ms[0].id, moods: ms.map((m) => m.id) }] : await bunchOf(f);
+    const list = kind === 'hero' ? [heroOf(f, ms)] : await bunchOf(f);
     const fl = await loadImg(FL.shoot(kind, list, IW, IH, null, seedOf(f))); c.drawImage(fl, ix, iy, IW, IH);   // 夜：压花直接贴在明信片纸上，不要底板
   }
   // 字的区域
@@ -260,7 +266,7 @@ async function drawCard(f, v) {
   if (f.photo) {   // 细线邮票框，里面是那天那朵花
     const sw = A ? 112 : 120, sh = sw * 1.22, sx = W - M - sw, sy = A ? top - 6 : M;
     c.fillStyle = PC.plate; c.fillRect(sx, sy, sw, sh);
-    const fl = await loadImg(FL.shoot('hero', [f.species || f.genes ? f : { mood: ms[0].id, moods: ms.map((m) => m.id) }], Math.round(sw * 2), Math.round(sh * 2), PC.plate, seedOf(f))); c.drawImage(fl, sx, sy, sw, sh);
+    const fl = await loadImg(FL.shoot('hero', [heroOf(f, ms)], Math.round(sw * 2), Math.round(sh * 2), PC.plate, seedOf(f))); c.drawImage(fl, sx, sy, sw, sh);
     c.strokeStyle = PC.line; c.lineWidth = 1.5; c.strokeRect(sx - 7.5, sy - 7.5, sw + 15, sh + 15);
   } else {         // 一圈细邮戳，月日在里面
     const r = A ? 62 : 66, cx = W - M - r, cy = A ? top + r - 20 : M + r;
@@ -273,11 +279,13 @@ async function drawCard(f, v) {
 function spaced(c, t, x, y, sp) { for (const ch of t) { c.fillText(ch, x, y); x += c.measureText(ch).width + sp; } }
 function lay(c, t, w) { const out = []; let l = ''; for (const ch of t) { if (ch === '\n') { out.push(l); l = ''; continue; } if (c.measureText(l + ch).width > w && l) { if ('，。、！？；：,.!?）」'.includes(ch)) { out.push(l + ch); l = ''; continue; } out.push(l); l = ch; } else l += ch; } if (l) out.push(l); return out; }
 const loadImg = (src) => new Promise((ok) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null); i.src = src; });
+let pcQ = Promise.resolve();
+const pcDraw = (v) => (window.__pcP = pcQ = pcQ.then(() => drawCard(cur, v)).catch((e) => console.error(e)));
 $('#cPost').onclick = async () => {
   pcI = 0; const v = window.__pcVariant || styOf(cur);
-  await (window.__pcP = drawCard(cur, v)); $('#card').hidden = true; $('#post').hidden = false;
+  await pcDraw(v); $('#card').hidden = true; $('#post').hidden = false;
 };
-$('#pFlip').onclick = () => { pcI++; window.__pcP = drawCard(cur, styOf(cur)); };
+$('#pFlip').onclick = () => { pcI++; pcDraw(styOf(cur)); };
 $('#pSave').onclick = async () => {
   const blob = await new Promise((ok) => $('#pc').toBlob(ok, 'image/jpeg', .92));
   const file = new File([blob], '明信片.jpg', { type: 'image/jpeg' });
@@ -306,6 +314,8 @@ $('#mImport').onchange = async (e) => {
   try {
     const j = JSON.parse(await f.text()); for (const x of j.flowers || []) await store.put(x);
     for (const [k, v] of Object.entries(j.local || {})) if (k.startsWith('diarytown_') && typeof v === 'string') localStorage.setItem(k, v);
+    /* 前打的包是老物价，钱少：去掉换物价的记号，重进时 day.js 再补到 500 */
+    if (j.local && !j.local.diarytown_econ_v2) localStorage.removeItem('diarytown_econ_v2');
     if (j.vases && j.vases.length) await vaseStore('readwrite', (s) => { j.vases.forEach((v) => s.put(v)); });
     if (j.local) { location.href = './?home'; return; }   /* 钱、种子、花位都换了，重进一遍花园 */
     (await gardenP).load(await store.all()); $('#menu').hidden = true;
@@ -322,9 +332,17 @@ $('#mDemo').onclick = async () => {
 $('#mClear').onclick = async () => { if (!confirm('花园里的花全清掉？')) return; await store.clear(); (await gardenP).load([]); $('#menu').hidden = true; };
 
 // ---------- 图鉴：园子里配出来的新花，点名字改名 ----------
-function renderBook() {
+/* 起日记花按心情抽，少见的那几种抽到过的也记在这儿，排在配出来的新花前面，不能改名 */
+async function renderBook() {
   const hs = Hy.hybrids(), ul = $('#bookList');
-  ul.innerHTML = hs.length ? '' : '<li class="empty">还没有。两盆不一样的插花挨着摆一夜，第二天盆边会冒苗。</li>';
+  const got = new Set((await store.all()).filter((f) => !f.hybrid && isRare(f.species)).map((f) => f.species));
+  const rs = Object.values(Hy.SPECIES).filter((s) => got.has(s.id));
+  ul.innerHTML = hs.length || rs.length ? '' : '<li class="empty">还没有。两盆不一样的插花挨着摆一夜，第二天盆边会冒苗。</li>';
+  for (const s of rs) {
+    const li = document.createElement('li'), m = MOODS.find((x) => x.id === s.id.replace(/\d+$/, ''));
+    li.innerHTML = `<i style="background:${s.c}"></i><b></b><small>${m ? m.zh + '那天' : ''}抽到的 · 少见</small>`;
+    li.querySelector('b').textContent = s.zh; li.style.cursor = 'default'; ul.appendChild(li);
+  }
   for (const s of hs) {
     const li = document.createElement('li');
     li.innerHTML = `<i style="background:${Hy.hexOf(s.genes)}"></i><b></b><small>${(s.parents || []).map(Hy.nameOf).join(' × ')}${s.genes.mut ? ' · 变了一点' : ''}</small>`;

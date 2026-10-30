@@ -91,6 +91,9 @@ async function fire() {
 let K3 = null;
 function kitchen([THREE, { OrbitControls }, L, L2, M, F], picked) {
   const ORDER = ['tiderice', 'thoughtleaf', 'boltbean', 'twinpeach', 'velvetgrape', 'palettemelon', 'lanternplant', 'heartberry', 'bloom'];
+  /* 应季菜：登记进小镇菜谱（长样子、切小件、单做的菜名），排位照 mem.js 插在心跳莓前面 */
+  M.useSpecies(Day.seasonSpecs());
+  for (const { spec } of Day.seasonSpecs()) if (!ORDER.includes(spec.id)) ORDER.splice(ORDER.length - 2, 0, spec.id);
   const FORM_LIST = ['plain', 'cake', 'stand', 'pizza', 'sundae', 'bento'];
   const old = $('cv'), cv = old.cloneNode(); old.replaceWith(cv);
   const W = () => innerWidth, H = () => innerHeight;
@@ -108,7 +111,7 @@ function kitchen([THREE, { OrbitControls }, L, L2, M, F], picked) {
   const group = new THREE.Group(); scene.add(group);
   const kinds = () => [...new Set(picked)].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
   const catchers = () => vessel.children.filter((c) => c.userData.catch);
-  const dishName = () => form === 'plain' ? M.dishOf(picked) : { name: kinds().map((k) => M.PRE[k]).join('') + F.FORMS[form][0], about: F.FORMS[form][1] };
+  const dishName = () => form === 'plain' ? Day.seasonDish(picked) || M.dishOf(picked) : { name: kinds().map((k) => M.PRE[k]).join('') + F.FORMS[form][0], about: F.FORMS[form][1] };
   function frame() {
     const narrow = W() / H() < .8, stand = vessel.userData.kind === 'stand';
     ctl.target.set(0, vessel.userData.camY, .35);
@@ -139,7 +142,7 @@ function kitchen([THREE, { OrbitControls }, L, L2, M, F], picked) {
   }
   function rebuild() {
     if (vessel) group.remove(vessel);
-    vessel = F.vessel(kinds()[0], form); L.outline(vessel, { w: .008 }); L.shadowAll(vessel);
+    vessel = Day.tintVessel(F.vessel(Day.seasonVessel(kinds()[0]), form), kinds()[0], form); L.outline(vessel, { w: .008 }); L.shadowAll(vessel);
     group.add(vessel); group.updateMatrixWorld(true); frame();
     const extra = F.EXTRA[form] || [], keep = pieces.filter((p) => picked.includes(p.userData.piece) || extra.includes(p.userData.piece));
     pieces.forEach((p) => group.remove(p)); pieces = [];
@@ -240,7 +243,7 @@ function saveRecipe(r) {
   const l = recipes(); if (l.some((x) => recipeKey(x) === recipeKey(r))) return;
   l.push({ ...r, at: Date.now() }); try { localStorage.setItem('diarytown_recipes', JSON.stringify(l)); } catch (e) {}
 }
-const cropZh = (k) => (Day.CROP_SEEDS[k] || {}).zh || k;
+const cropZh = Day.cropZh;
 const canMake = (r) => { const p = Day.pantry(); return Math.min(...r.crops.map((k) => +p[k] || 0)); };
 const want = {};
 function renderRecipes() {

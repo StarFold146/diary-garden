@@ -6,8 +6,9 @@ import { mat, washTex, outline, lights, shadowAll } from './shop/look.js';
 import { makeLook } from './town/look2.js';
 import { C, archWindow, DECOR } from './shop/house.js';
 import * as K from './town/food.js';
-import { SPECIES, dishOf } from './town/mem.js';
+import { SPECIES, dishOf, useSpecies } from './town/mem.js';
 import * as Day from './day.js';   /* 一天开一次店、结一次账、补一次货；种子铺 */
+useSpecies(Day.seasonSpecs());   /* 应季菜（南瓜、栗子、柿子）登记进小镇的菜谱，后厨端出来的应季菜柜子里才摆得出来 */
 
 const $ = (s) => document.querySelector(s);
 const MOOD_C = { happy: '#f2c14e', sweet: '#e98aa4', calm: '#9ec5e6', coax: '#f3b9a0', down: '#b9a3de', messy: '#c9b38a', cross: '#e36a5a' };
@@ -54,6 +55,8 @@ const at = (o, x, y, z) => { o.position.set(x, y, z); return o; };
 
 // ---------- 屋子：一面开着的小咖啡甜品店，像过家家的娃娃屋 ----------
 const W = 4.8, D = 4.4, H = 3;
+/* 后墙：拱窗中心 WIN_X，后厨门中心 KIT_X */
+const WIN_X = -1.5, KIT_X = -.2;
 const room = new THREE.Group();
 function buildRoom() {
   /* 地板：默认原木；?floor=light 浅色洗白橡木；?floor=tile 奶油配鼠尾草绿的棋盘砖 */
@@ -76,7 +79,7 @@ function buildRoom() {
   }
   for (let i = 0; i < 7; i++) { const pnl = box(.5, .55, .02, C.tealD); at(pnl, -1.95 + i * .65, .47, -D / 2 + .05); pnl.userData.lineW = .004; room.add(pnl); }
   /* 后墙左边一扇拱窗，亮着 */
-  const win = archWindow(1.05, 1.5, { frame: C.teal, lit: true, surround: C.trim }); at(win, -1.3, 1.1, -D / 2 + .01); room.add(win);
+  const win = archWindow(1.05, 1.5, { frame: C.teal, lit: true, surround: C.trim }); at(win, WIN_X, 1.1, -D / 2 + .01); room.add(win);
   /* 左墙一扇窗，窗下一张小圆桌两把椅子 */
   const win2 = archWindow(.9, 1.3, { frame: C.teal, lit: true, surround: C.trim }); win2.rotation.y = Math.PI / 2; at(win2, -W / 2 + .01, 1.15, 1.15); win2.userData.side = 'L'; room.add(win2);
   room.add(table(-1.6, 1.15));
@@ -177,11 +180,11 @@ function buildCase() {
 }
 /* 下午茶：三层点心架、切块蛋糕、司康、手指三明治、马卡龙 */
 const TEA = {
-  stand:    ['三层下午茶', '最下层三明治，中间司康，顶上马卡龙和小奶油花，从下往上吃。', 42],
-  slice:    ['切块蛋糕', '一角海绵夹奶油，顶上一颗莓。', 22],
-  scone:    ['司康配果酱', '掰开抹一层奶油，再抹果酱，顺序别弄反。', 18],
-  sandwich: ['手指三明治', '去了边，切成细条，一口一个。', 16],
-  macaron:  ['马卡龙一碟', '几种颜色各来一个。', 20],
+  stand:    ['三层下午茶', '最下层三明治，中间司康，顶上马卡龙和小奶油花，从下往上吃。', 95],
+  slice:    ['切块蛋糕', '一角海绵夹奶油，顶上一颗莓。', 50],
+  scone:    ['司康配果酱', '掰开抹一层奶油，再抹果酱，顺序别弄反。', 42],
+  sandwich: ['手指三明治', '去了边，切成细条，一口一个。', 38],
+  macaron:  ['马卡龙一碟', '几种颜色各来一个。', 46],
 };
 const SLICE_C = [['#f3d9a6', '#f2a8a0', '草莓'], ['#c9dca0', '#fbf3e6', '抹茶'], ['#7a5236', '#f3e7d1', '可可']];
 function teaDish(sd) {
@@ -225,7 +228,8 @@ function teaMesh(d) {
   }
   return g;
 }
-function priceOf(keys, special, form) { return 10 + keys.length * 6 + (special ? 10 : 0) + (form === 'cake' ? 8 : 0); }
+/* 物价跟种子一起涨：一样菜 44、两样 56、三样 68，隐藏菜 +20、做成蛋糕 +14，卖一盘差不多换一包种子 */
+function priceOf(keys, special, form) { return 32 + keys.length * 12 + (special ? 20 : 0) + (form === 'cake' ? 14 : 0); }
 function newDish(sd) {
   seed = sd; if (rnd() < .45) return teaDish(sd + 1); seed = sd; const n = 1 + Math.floor(rnd() * 3), keys = [];
   while (keys.length < n) { const k = MAINS[Math.floor(rnd() * MAINS.length)]; if (!keys.includes(k)) keys.push(k); }
@@ -236,7 +240,7 @@ function newDish(sd) {
 function dishMesh(dsh) {
   if (dsh.tea) { const tg = teaMesh(dsh); outline(tg, { w: .006 }); shadowAll(tg); return fitDish(tg, dsh.tea === 'stand' ? .3 : .22); }
   const g = new THREE.Group(); seed = dsh.seed;
-  const v = K.vessel(dsh.keys[0], dsh.form); g.add(v);
+  const v = Day.tintVessel(K.vessel(Day.seasonVessel(dsh.keys[0]), dsh.form), dsh.keys[0], dsh.form); g.add(v);
   const catches = []; v.traverse((o) => { if (o.userData && o.userData.catch) catches.push(o); });
   const list = dsh.keys.flatMap((k) => [k, k, k]).concat(K.EXTRA[dsh.form] || []);
   list.forEach((k, i) => {
@@ -265,7 +269,9 @@ let STATE = null;
 function loadState() {
   try { STATE = JSON.parse(localStorage.getItem('diarytown_case') || 'null'); } catch (e) { STATE = null; }
   /* 柜子起步是空的，不再自己变出菜来 */
-  if (!Array.isArray(STATE) || STATE.length !== 9) { STATE = Array(9).fill(null); saveState(); }
+  if (!Array.isArray(STATE) || STATE.length !== 9) { STATE = Array(9).fill(null); saveState(); return; }
+  /* 换了物价：柜子里早就摆着的按新价钱重算 */
+  STATE = STATE.map((d) => !d ? null : { ...d, price: d.tea ? (TEA[d.tea] ? TEA[d.tea][2] : d.price) : priceOf(d.keys || [], d.special, d.form) }); saveState();
 }
 const saveState = () => { try { localStorage.setItem('diarytown_case', JSON.stringify(STATE)); } catch (e) {} };
 const tagsEl = $('#tags'), TAGS = [];
@@ -396,11 +402,13 @@ const setCoins = (n) => { try { localStorage.setItem('diarytown_coins', String(n
 setCoins(getCoins());
 $('#close').onclick = () => {
   closeAll(); if (!Day.once('settle')) { dayBar(); return; }
+  /* 一天只卖掉一盘。改成柜子里的七成到全部都卖掉，隐藏菜和蛋糕先被挑走，剩下的随机 */
   const sold = []; let sum = 0;
-  STATE.forEach((d, i) => {
-    if (!d) return;
-    const p = d.tea ? .62 : Math.min(.88, .35 + d.keys.length * .12 + (d.special ? .2 : 0) + (d.form === 'cake' ? .1 : 0));
-    if (Math.random() < p) { sold.push({ d, who: pick(FOLKS) }); sum += d.price; STATE[i] = null; }
+  const full = STATE.map((d, i) => d ? i : -1).filter((i) => i >= 0);
+  const n = Math.max(1, Math.round(full.length * (.7 + Math.random() * .3)));
+  const want = (d) => (d.special ? 2 : 0) + (d.form === 'cake' ? 1 : 0) + Math.random() * 1.5;
+  full.map((i) => [i, want(STATE[i])]).sort((a, b) => b[1] - a[1]).slice(0, n).forEach(([i]) => {
+    const d = STATE[i]; sold.push({ d, who: pick(FOLKS) }); sum += d.price; STATE[i] = null;
   });
   saveState(); renderCase(); setCoins(getCoins() + sum);
   const left = STATE.filter(Boolean).length;
@@ -481,13 +489,17 @@ function dayBar() {
 // ---------- 种子铺：花种子拿去园子里种，菜种子种出来进厨房 ----------
 function seedRow(id, it, owned, unit, buy) {
   const li = document.createElement('li'), c = Day.coins(), b = document.createElement('button');
-  li.innerHTML = `<span>${it.c ? `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;background:${it.c}"></i>` : ''}${it.zh}${it.hybrid ? '<small> 园子里配的</small>' : ''}<small>${owned ? ' 有 ' + owned + unit : ''}</small></span>`;
+  li.innerHTML = `<span>${it.c ? `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;background:${it.c};box-shadow:0 0 0 .5px rgba(90,60,50,.3)"></i>` : ''}${it.season ? `<em class="stag ${it.season}">${Day.SEASON_ZH[it.season]}</em>` : ''}${it.zh}${it.hybrid ? '<small> 园子里配的</small>' : ''}<small>${owned ? ' 有 ' + owned + unit : ''}</small></span>`;
   b.className = 'buy'; b.disabled = c < it.p; b.textContent = it.p + ' 花币';
   b.onclick = () => { if (buy(id)) { setCoins(Day.coins()); renderSeeds(); } };
   li.appendChild(b); return li;
 }
 function renderSeeds() {
   const fl = $('#sFlower'), cr = $('#sCrop'), s = Day.seeds(), p = Day.pantry();
+  /* 应季：当季的花和菜排最顶上，过季这一栏整个藏起来 */
+  const sf = Object.entries(Day.seasonFlowerSeeds()), sc = Object.entries(Day.seasonCropSeeds());
+  $('#sSeason').replaceChildren(...sf.map(([id, it]) => seedRow(id, it, s[id], ' 粒', Day.buyFlowerSeed)), ...sc.map(([id, it]) => seedRow(id, it, p[id], ' 份', Day.buyCropSeed)));
+  $('#sSeason').hidden = $('#sSeasonH').hidden = !(sf.length + sc.length);
   fl.replaceChildren(...Object.entries(Day.flowerSeeds()).map(([id, it]) => seedRow(id, it, s[id], ' 粒', Day.buyFlowerSeed)));
   cr.replaceChildren(...Object.entries(Day.CROP_SEEDS).map(([id, it]) => seedRow(id, it, p[id], ' 份', Day.buyCropSeed)));
   $('#sCoins').textContent = Day.coins() + ' 花币';
@@ -496,9 +508,10 @@ $('#seedsBtn').onclick = () => { closeAll(); renderSeeds(); $('#seeds').hidden =
 if (/[?&]seeds\b/.test(location.search)) setTimeout(() => $('#seedsBtn').onclick(), 400);
 
 // ---------- 开门 ----------
-/* 后厨小门：后墙柜台左边，门上挂块小牌子，点了进厨房 */
+/* 后厨小门：后墙柜台左边，门上挂块小牌子，点了进厨房。
+   门贴着拱窗了。门往柜台那边挪、拱窗往左挪，中间空出一截墙 */
 const kitDoor = (() => {
-  const g = new THREE.Group(), z = -D / 2 + .07;
+  const g = new THREE.Group(), z = -D / 2 + .07, X = KIT_X;
   g.add(at(box(.68, 1.82, .06, C.tealD), 0, .91, 0));
   for (const y of [.5, 1.3]) { const p = at(box(.5, .55, .02, C.teal), 0, y, .035); p.userData.lineW = .004; g.add(p); }
   g.add(at(box(.78, .06, .1, C.trim), 0, 1.85, 0));
@@ -509,8 +522,8 @@ const kitDoor = (() => {
   /* 字体按字分片懒加载，画布不会自己去拉「厨」那一片：拉完再画一遍 */
   document.fonts.load(FONT, '后厨').then(() => { paint(); tx.needsUpdate = true; markDirty(); }).catch(() => {});
   const sign = at(new THREE.Mesh(new THREE.BoxGeometry(.4, .16, .02), [mat('#9a6b4c'), mat('#9a6b4c'), mat('#9a6b4c'), mat('#9a6b4c'), new THREE.MeshBasicMaterial({ map: tx }), mat('#9a6b4c')]), 0, 1.62, .08); sign.userData.noLine = true; g.add(sign);
-  outline(g, { w: .008 }); shadowAll(g); at(g, -.45, 0, z); S.add(g);
-  const hit = new THREE.Mesh(new THREE.BoxGeometry(.8, 2, .3), new THREE.MeshBasicMaterial({ visible: false })); at(hit, -.45, 1, z + .1); hit.userData = { kitchen: true, noLine: true }; S.add(hit);
+  outline(g, { w: .008 }); shadowAll(g); at(g, X, 0, z); S.add(g);
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(.8, 2, .3), new THREE.MeshBasicMaterial({ visible: false })); at(hit, X, 1, z + .1); hit.userData = { kitchen: true, noLine: true }; S.add(hit);
   return hit;
 })();
 buildRoom(); outline(room); shadowAll(room); S.add(room);
