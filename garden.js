@@ -7,10 +7,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mat, washTex, outline, shadowAll } from './shop/look.js';
 import { makeLook } from './look.js';
-import { buildHouse, C } from './shop/house.js';
+import { buildHouse, C, archShape } from './shop/house.js';
 import * as TM from './town/mem.js';
 import * as LAND from './town/land.js';
 import * as FR from './town/fr.js';
+import * as SP from './town/species.js';   /* 应季菜（南瓜、栗子、柿子）照说明长，田里用 */
 import * as Day from './day.js';   /* 种子、花位、换天 */
 import * as Hy from './hybrid.js';   /* 杂交：两盆挨着过一夜冒苗 */
 import { buildFarHills } from './hills.js';   /* 远山 */
@@ -118,20 +119,23 @@ async function initInner(canvas, moods) {
   sun.shadow.bias = -.0006; sun.shadow.normalBias = .02; sun.shadow.radius = 4; sun.shadow.intensity = .5; S.add(sun, sun.target);
   LOOK = makeLook(R, G.paper); LOOK.setTilt(.45, .5); LOOK.setWarm(.5);
   T.mark('setup'); stage = '盖园子';
+  settleExpand();   /* 扩建：过了早上六点的先建好，田几排、花位几个都定下来再盖 */
   await buildWorld();
   flowerRoot = new THREE.Group(); S.add(flowerRoot);
   await yieldUI(); stage = '天色'; setupSky(); applySky(); setInterval(applySky, 60000); setupZones();
-  await yieldUI(); stage = '种的花'; addHybridSp(); addSeasonalSp(); loadBeds(); setupPlantUI(); setupPowerUI(); loadVases(); breed();
+  await yieldUI(); stage = '种的花'; addHybridSp(); addSeasonalSp(); loadBeds(); setupPlantUI(); setupPowerUI(); loadVases(); breed(); setupField();
   addEventListener('resize', resize); resize();
   flushGlints(); applyPower(); shadowsDirty();
   await yieldUI(); stage = '编着色器'; try { if (R.extensions.has('KHR_parallel_shader_compile')) await R.compileAsync(S, CAM); } catch (e) {}   /* 能并行编的手机上不占主线程 */
   await yieldUI(); stage = '第一次画'; LOOK.render(S, CAM);   /* 先编一遍着色器，进门那一下不卡 */
-  if (Q.has('perf')) window.__G = { R, S, CAM, LOOK, CTL };   /* 量性能用：?perf 才挂出来 */
+  if (Q.has('perf')) window.__G = { R, S, CAM, LOOK, CTL, hat: (x, z) => HAT(x, z) };   /* 量性能用：?perf 才挂出来 */
   T.mark('render'); console.log('garden init', JSON.stringify(T.out), 'calls', R.info.render.calls, 'tris', R.info.render.triangles, 'geos', R.info.memory.geometries);
 }
 export function start() {
   started = true; wake(2000); if (!document.hidden) R.setAnimationLoop(loop);
   if (newSprouts) setTimeout(() => toast('盆边冒了一株苗'), 600);
+  EXP_DONE.forEach((e, i) => setTimeout(() => toast(expDoneText(e)), 600 + (newSprouts ? 1900 : 0) + i * 1900));   /* 扩建好了，只说这一回 */
+  if (Q.has('farm')) { const z = ZONES.find((m) => m.userData.zone.name === 'farm'); if (z) setTimeout(() => goZone(z.userData.zone), 400); }   /* 后厨「去田里收一收」带 ?farm 进来，直接飞到田边 */
 }
 /* —— 省电：最多 30 帧；切到后台整个停。手机 60/120Hz 的 rAF 都按时间取整。
    再凉一档：没人碰的时候，刚松手那二十秒 8 帧、再往后 5 帧（花晃、波光、水圈都是慢动作，看不出卡）；
@@ -368,7 +372,7 @@ function loadBeds() {
   try { BEDS = JSON.parse(localStorage.getItem('diarytown_beds') || '[]') || []; } catch (e) { BEDS = []; }
   for (const b of BEDS) { try { clumpRoot.add(makeClump(b)); } catch (e) { console.error(e); } }
 }
-const plantOK = (x, z) => inPoly(x, z) ? okSpot(x, z) : (HAT(x, z) > .03 && pathDist(x, z) > .3 && !(x > 7.4 && x < 14.4 && z > -3.4 && z < 1.6) && !(x > 3.2 && x < 11.6 && z > -10 && z < -5.2));
+const plantOK = (x, z) => inPoly(x, z) ? okSpot(x, z) : (HAT(x, z) > .03 && pathDist(x, z) > .3 && !(x > 7.4 && x < 14.4 && z > -3.4 && z < 1.6) && !(x > 3.2 && x < 11.6 && z > -10 && z < -5.2) && !expBlockers().some((f) => f(x, z)));
 function plantAt(x, z) {
   if (!plantOK(x, z)) { toast('这儿种不了'); return; }
   /* 一丛要几粒种子看疏密，种子去店里买 */
@@ -489,6 +493,13 @@ function addSeasonalSp() {
     if (!s.season || PLANT_SP.some((x) => x.id === s.id)) continue;
     PLANT_SP.push({ id: s.id, zh: s.zh, c: [s.c], kind: 'cosmos', seasonal: true });
   }
+  /* 送的花（hybrid.js 里带 gift 的）：口袋里有它的种子才出现在种花面板里，颜色取渐变的头一个 */
+  let planted = []; try { planted = (JSON.parse(localStorage.getItem('diarytown_beds') || '[]') || []).map((b) => b.sp); } catch (e) {}   /* 种子用完了，已经种下的那几丛照样认得 */
+  for (const s of Object.values(Hy.SPECIES)) {
+    if (!s.gift || PLANT_SP.some((x) => x.id === s.id) || !(Day.seedCount(s.id) > 0 || planted.includes(s.id))) continue;
+    let kind = 'cosmos'; try { const P = Hy.paramsOf(s.genes); kind = P.cluster ? 'mound' : P.dbl ? (P.scale > 1.2 ? 'peony' : 'rose') : P.n >= 7 ? 'daisy' : 'cosmos'; } catch (e) {}
+    PLANT_SP.push({ id: s.id, zh: s.zh, c: [s.grad && s.grad[0] || s.c], kind, gift: true });
+  }
 }
 
 /* —— 点哪儿飞哪儿，照记忆小镇的 flyTo：目标和机位一起缓动 —— */
@@ -500,7 +511,7 @@ function flyTo(to, dist, dir = null, after = null) {
   const d = dir ? dir.clone().normalize() : CAM.position.clone().sub(CTL.target).normalize();
   wake(1600); fly = { t0: performance.now(), a: CTL.target.clone(), b: to.clone(), pa: CAM.position.clone(), pb: to.clone().addScaledVector(d, dist), after };
 }
-function goHome() { if (!HOME) return; away = false; if (backBtn) backBtn.hidden = true; LOOK.setTilt(.45, .5); flyTo(HOME.t, HOME.d, HOME.dir); }
+function goHome() { if (!HOME) return; hideFarmCard(); away = false; if (backBtn) backBtn.hidden = true; LOOK.setTilt(.45, .5); flyTo(HOME.t, HOME.d, HOME.dir); }
 function goZone(z) {
   away = true; if (backBtn) backBtn.hidden = false; LOOK.setTilt(.7, .5);
   flyTo(z.at, z.dist, z.dir || new THREE.Vector3(-.6, .75, .55), z.after || null);
@@ -509,11 +520,12 @@ function addZone(name, x, y, z, sx, sy, sz, at, dist, after) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ visible: false })); m.position.set(x, y, z); m.userData.zone = { name, at: new THREE.Vector3(...at), dist, after }; S.add(m); ZONES.push(m);
 }
 function setupZones() {
-  addZone('farm', 10.6, .3, -.45, 6.6, .8, 4.2, [10.6, .1, -.45], 10);
+  { const ex = (FIELD_G.rows - 3) * FIELD_G.TS; addZone('farm', 10.6, .3, -.45 + ex / 2, 6.6, .8, 4.2 + ex, [10.6, .1, -.45 + ex / 2], 10); }
   addZone('shop', SHOP.x, 1.4, SHOP.z - .3, 2.3, 2.8, 2.2, [SHOP.x, .9, SHOP.z + .4], 7.5, () => setTimeout(() => { location.href = 'shop.html'; }, 250));
   addZone('deck', DECK.x, .5, DECK.z, DECK.w + .2, 1.1, DECK.d + .2, [DECK.x, .4, DECK.z], 7);
   addZone('pond', POND.x, .2, POND.z, POND.r * 2.4, .5, POND.r * 2.4, [POND.x, .1, POND.z], 6.5);
   addZone('village', 7.9, 1, -7.7, 7.5, 2, 4.2, [7.9, .5, -7.7], 11);
+  for (const e of EXP) if (e.at && expState(e.id) === 'built') addZone(e.id, e.at[0], .5, e.at[1], e.r * 1.8, 1.2, e.r * 1.8, [e.at[0], .35, e.at[1]], 6.5);   /* 建好的花架、水池这些，点一下也飞过去看看 */
   backBtn = document.createElement('button'); backBtn.textContent = '回园子'; backBtn.hidden = true;
   backBtn.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 40px);z-index:6;padding:7px 18px;border-radius:20px;border:0;background:rgba(255,252,246,.92);color:#5b4a44;font:inherit;font-size:13px;letter-spacing:.2em;box-shadow:0 4px 14px -8px rgba(80,50,40,.35)';
   backBtn.onclick = goHome; document.body.appendChild(backBtn);
@@ -667,6 +679,7 @@ export function applySky() {
   LAMPS.forEach((l) => { l.intensity = t.lamp; l.visible = t.lamp > 0; });   /* 白天灯不亮就整盏关掉：着色器里少算四盏点光（换时辰时重编一次） */
   if (k + WX !== skyKey) { skyKey = k + WX; shadowsDirty(); }   /* 太阳换了位置才重算影子 */
   glowM.forEach((m) => m.emissiveIntensity = m.userData.base * t.glow);
+  EXP_GLOW.forEach((g) => { g.visible = k === 'night' || k === 'dusk'; g.material.opacity = k === 'night' ? .55 : .3; });   /* 施工的马灯、花架上的灯：夜里脚下一团暖光 */
   FARM_SOIL.forEach((m, i) => { m.emissive = m.emissive || new THREE.Color(); m.emissive.set('#5a3a24'); m.emissiveIntensity = (k === 'night' ? .5 : k === 'dusk' ? .12 : 0) * (i === 3 ? .3 : 1); });
   if (RAIN) { RAIN.visible = WX === 'rain'; RAIN.material.uniforms.uCol.value.set(k === 'night' ? '#a3b0d4' : k === 'dusk' ? '#c3c6da' : '#c9d5e2'); RAIN.material.uniforms.uA.value = k === 'night' ? .3 : .35; }
   SPLASH.forEach((r) => r.material.uniforms.uCol.value.set(k === 'night' ? '#aab5d6' : '#e6edf4'));
@@ -767,7 +780,7 @@ function bloomTree(h, sd, cols) {
 }
 /* 一丛灌木：几团挤在一起，可选开小花 */
 function shrub(x, z, size, colors, flowersOn = null) {
-  const g = new THREE.Group(); g.position.set(x, inPoly(x, z) ? .08 : Math.max(.0, HAT(x, z)) + .02, z);
+  const g = new THREE.Group(); g.position.set(x, inPoly(x, z) || (ROOM_ON && inRoom(x, z)) ? .08 : Math.max(.0, HAT(x, z)) + .02, z);
   const n = 3 + Math.floor(rnd() * 3);
   for (let i = 0; i < n; i++) {
     const r = size * (.45 + rnd() * .45), b = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), mat(colors[Math.floor(rnd() * colors.length)]));
@@ -785,7 +798,7 @@ async function buildWorld() {
   /* 环境：照记忆小镇用 land.js 的岛和水，园子、田、小村各一块平地 */
   const lawnC = new THREE.Color(G.grass);
   /* 篱笆外的地贴着园子先接园子的绿，往外两三步才慢慢变成岛上的浅草绿，没有硬色边 */
-  const land = LAND.island(ISLE_RECTS, { grass: '#a9cf86', grassD: '#94bf74', sand: '#ecdcb0', deep: '#93c9c6', seed: 4, tone: (x, z, h, c) => { if (h < -.1 || inPoly(x, z)) return; const dd = edgeDist(x, z); if (dd < 3) c.lerp(lawnC, .75 * (1 - dd / 3) * (1 - dd / 3)); } });
+  const land = LAND.island(isleRects(), { grass: '#a9cf86', grassD: '#94bf74', sand: '#ecdcb0', deep: '#93c9c6', seed: 4, carve: ROOM_ON ? roomCarve : null, tone: (x, z, h, c) => { if (h < -.1 || inPoly(x, z)) return; const dd = edgeDist(x, z); if (dd < 3) c.lerp(lawnC, .75 * (1 - dd / 3) * (1 - dd / 3)); } });
   HAT = land.userData.heightAt; OUTER_M = land.material; land.userData.keep = true; world.add(land);
   T.mark('b-island'); await yieldUI();
   const sea = LAND.water(90); sea.position.y = -.5; sea.userData.keep = true; world.add(sea);
@@ -805,7 +818,7 @@ async function buildWorld() {
   T.mark('b-shop'); await yieldUI();
   /* 围边：前面和左边白篱笆（大门、侧门留口），后面右边是绿篱；大半段被灌木和藤吃掉 */
   const pk = [], hg = [];
-  const gap = (mx, mz) => (Math.abs(mx - GATE.x) < GATE.half && mz > 2.9) || (Math.abs(mz - SIDE.z) < SIDE.half && mx > 3.8);
+  const gap = (mx, mz) => (Math.abs(mx - GATE.x) < GATE.half && mz > 2.9) || (Math.abs(mz - SIDE.z) < SIDE.half && mx > 3.8) || (ROOM_ON && Math.abs(mx - ARCH.x) < ARCH.half && mz > 2.9);   /* 有了新园子，老池子正南开一道拱门 */
   for (let i = 0; i < EDGE.length - 1; i++) {
     const a = EDGE[i], b = EDGE[i + 1], mx = (a.x + b.x) / 2, mz = (a.y + b.y) / 2, len = Math.hypot(b.x - a.x, b.y - a.y), ang = Math.atan2(b.y - a.y, b.x - a.x);
     if (gap(mx, mz)) continue;
@@ -830,7 +843,8 @@ async function buildWorld() {
     if (p.y > 2.6 && rnd() < .55) continue;   /* 正前方镜头那边少压一点，别挡住池子和路 */
     const n = new THREE.Vector2(p.x, p.y).normalize(), out = (rnd() - .35) * .45;
     const fl = p.y > 2.4 || p.x < -3.8 ? [G.pink, C.white] : rnd() < .3 ? ['#fbf6ec'] : null;
-    world.add(shrub(p.x + n.x * out, p.y + n.y * out, .32 + rnd() * .22, [G.leaf, G.leafD, G.leafL], fl));
+    const sb = shrub(p.x + n.x * out, p.y + n.y * out, .32 + rnd() * .22, [G.leaf, G.leafD, G.leafL], fl);
+    if (!(ROOM_ON && Math.hypot(p.x - ARCH.x, p.y - ARCH.z) < .85)) world.add(sb);   /* 拱门口不压灌木；照样盖一丛再扔掉，随机数不乱 */
   }
   T.mark('b-shrubs'); await yieldUI();
   /* 园路：一条细细弯弯的石板路，石板隔得开；拱门到店门，半路岔去花架，岔路上再一条侧路出篱笆去田；门外一段弯出画面 */
@@ -960,6 +974,7 @@ async function buildWorld() {
   for (const [x, z, s] of [[-6.2, -1.5, .42], [-6.9, .6, .38], [.4, -5.3, .44], [6.6, 2.2, .38], [7.6, -2.6, .34]]) world.add(shrub(x, z, s, [G.leaf, G.leafD, G.leafL], rnd() < .4 ? [G.pink, C.white] : null));
   T.mark('b-trees'); await yieldUI();
   buildFarm(world);
+  buildExpand(world);
   T.mark('b-farm'); await yieldUI(); stage = '合并网格';
   bake(world); T.mark('bake'); await yieldUI(); stage = '描边';
   outline(world); T.mark('outline'); shadowAll(world); S.add(world);
@@ -972,25 +987,27 @@ function buildFarm(world) {
      方块地、两色土、三道垄沟、一格一株作物——同一种作物挨在一起、都长得旺（小镇是按主题排的，熟的多）；
      田底下垫一块土地（不是草），田口一条土路接侧路；角上照小镇那口井和一圈花圃、田边一个稻草人、两卷草垛 */
   const farm = new THREE.Group(), P = FR.P;
-  const KINDS = ['心动', '心动', '心动', '远方', '远方', '远方', '朋友', '朋友', '游戏', '游戏', '游戏', '创作', '创作', '工作', '工作', '居家', '居家', '居家'];
-  const COLS = 6, ROWS = 3, TS = .9, FX = 10.85, FZ = -.45, fw = COLS * TS, fd = ROWS * TS;
+  /* 扩建加的排接在南边（+z）：老的 18 块按列编号不动，第 19 块起一排一排往后数（plotCR） */
+  const { COLS, ROWS, TS, FX, FZ, rows } = FIELD_G, fw = COLS * TS, fd0 = ROWS * TS, fd = rows * TS, zTop = FZ - fd0 / 2;
   /* 田底下那块土：圆角、比田大一圈，颜色跟小镇田边的地一样偏土黄 */
-  const pad = new THREE.Mesh(new RoundedBoxGeometry(fw + 1.6, .04, fd + 1.4, 3, .3), wash('#cdbb8a', { rep: [2, 1], seed: 21, blots: 20 })); pad.position.set(FX + .25, .02, FZ); pad.userData.noLine = true; farm.add(pad);
+  const pad = new THREE.Mesh(new RoundedBoxGeometry(fw + 1.6, .04, fd + 1.4, 3, .3), wash('#cdbb8a', { rep: [2, 1], seed: 21, blots: 20 })); pad.position.set(FX + .25, .02, zTop + fd / 2); pad.userData.noLine = true; farm.add(pad);
   /* 夜里田别洗成灰：土用自己的材质，夜里加一点暖棕的自发光（applySky 里调） */
   const soilA = mat('#8a6a4c', { name: 'farmA' }), soilB = mat('#957459', { name: 'farmB' }), furrow = mat('#6e5238', { name: 'farmF' });
   FARM_SOIL.push(soilA, soilB, furrow, pad.material);
-  for (let k = 0; k < COLS * ROWS; k++) {
+  for (let k = 0; k < COLS * rows; k++) {
     /* 按列排：同一种作物竖着挨在一起 */
-    const c = Math.floor(k / ROWS), r = k % ROWS, x = FX - fw / 2 + TS / 2 + c * TS, z = FZ - fd / 2 + TS / 2 + r * TS;
+    const [c, r] = plotCR(k), x = FX - fw / 2 + TS / 2 + c * TS, z = zTop + TS / 2 + r * TS;
     const tile = new THREE.Mesh(new RoundedBoxGeometry(TS - .07, .1, TS - .07, 2, .03), (c + r) % 2 ? soilA : soilB); tile.position.set(x, .07, z); tile.userData.lineW = .006; farm.add(tile);
     for (const dz of [-.2, 0, .2]) { const f = new THREE.Mesh(new THREE.BoxGeometry(TS - .2, .012, .03), furrow); f.position.set(x, .125, z + dz); f.userData.noLine = true; farm.add(f); }
-    const pl = TM.plant({ kind: 'mem', w: 10 + (k % 3) * 1.5, domain: [KINDS[k]], id: 'farm' + k }, k); pl.position.set(x, .12, z); pl.scale.multiplyScalar(1.35); farm.add(pl);
+    FIELD_G.xz[k] = [x, z];   /* 作物不在这儿画了：setupField 按 diarytown_field 一块块长 */
   }
-  const x0 = FX - fw / 2 - .2, x1 = FX + fw / 2 + .2, z0 = FZ - fd / 2 - .2, z1 = FZ + fd / 2 + .2;
+  const x0 = FX - fw / 2 - .2, x1 = FX + fw / 2 + .2, z0 = zTop - .2, z1 = zTop + fd + .2;
+  const gt = (FZ - z0) / (z1 - z0), gh = .07 * (fd0 + .4) / (fd + .4);   /* 西边栅栏的口子一直对着田口土路（FZ），田变长了口子不跟着跑 */
+  FIELD_G.x0 = x0; FIELD_G.z1 = z1;
   for (const [ax, az, bx, bz, gap] of [[x0, z0, x1, z0, 0], [x1, z0, x1, z1, 0], [x0, z1, x1, z1, 0], [x0, z0, x0, z1, 1]]) {
     const len = Math.hypot(bx - ax, bz - az), n = Math.max(2, Math.round(len / .45));
-    for (let i = 0; i <= n; i++) { const t = i / n; if (gap && Math.abs(t - .5) < .07) continue; const p = new THREE.Mesh(new THREE.BoxGeometry(.05, .26, .05), mat('#c9a77a')); p.position.set(ax + (bx - ax) * t, .15, az + (bz - az) * t); p.userData.lineW = .003; farm.add(p); }
-    for (const seg of gap ? [[0, .43], [.57, 1]] : [[0, 1]]) {
+    for (let i = 0; i <= n; i++) { const t = i / n; if (gap && Math.abs(t - gt) < gh) continue; const p = new THREE.Mesh(new THREE.BoxGeometry(.05, .26, .05), mat('#c9a77a')); p.position.set(ax + (bx - ax) * t, .15, az + (bz - az) * t); p.userData.lineW = .003; farm.add(p); }
+    for (const seg of gap ? [[0, gt - gh], [gt + gh, 1]] : [[0, 1]]) {
       const sx = ax + (bx - ax) * seg[0], sz = az + (bz - az) * seg[0], ex = ax + (bx - ax) * seg[1], ez = az + (bz - az) * seg[1], l2 = Math.hypot(ex - sx, ez - sz);
       const rail = new THREE.Mesh(new THREE.BoxGeometry(l2, .03, .03), mat('#c9a77a')); rail.position.set((sx + ex) / 2, .22, (sz + ez) / 2); rail.rotation.y = -Math.atan2(ez - sz, ex - sx); rail.userData.lineW = .003; farm.add(rail);
     }
@@ -1020,6 +1037,537 @@ function buildFarm(world) {
   /* 两卷草垛 */
   for (const [x, z] of [[x1 + .45, z0 + .2], [x1 + .5, z0 + .55]]) { const hb = new THREE.Mesh(new THREE.CylinderGeometry(.15, .15, .22, 14), mat('#e2c27a')); hb.rotation.z = Math.PI / 2; hb.position.set(x, .17, z); farm.add(hb); }
   world.add(farm);
+}
+
+/* —— 田能种能收——
+   18 块地存 diarytown_field（day.js），买来的菜种子在口袋 diarytown_cropseeds 里。走到田边（点田飞过去）以后：
+   点空地挑一粒种子种下；点长着的看还要多久；点熟了的收进菜篮子（1–3 份）；长按一块问拔不拔（种子不退）。
+   长三段：小芽 → 小苗 → 挂果 → 熟了，熟了的头上闪几颗金点（省电档收起来），田口一块小木牌写熟了几块。
+   作物整片合成一份网格再描边（跟原来烤进园子里一样省），哪块变了就整片重盖一次 —— */
+const FIELD_G = { COLS: 6, ROWS: 3, TS: .9, FX: 10.85, FZ: -.45, xz: [], x0: 0, z1: 0, rows: 3, rowsLand: 3 };
+/* 第 k 块地在第几列第几排：老 18 块按列（3 排），扩建加的从第 19 块起按排（6 块一排） */
+const plotCR = (k) => k < 18 ? [Math.floor(k / 3), k % 3] : [(k - 18) % 6, 3 + Math.floor((k - 18) / 6)];
+/* 老田里画着的作物（按小镇主题排的），第一次进来照这个搬成熟了的地，看上去跟以前一样 */
+const FARM_KINDS = ['心动', '心动', '心动', '远方', '远方', '远方', '朋友', '朋友', '游戏', '游戏', '游戏', '创作', '创作', '工作', '工作', '居家', '居家', '居家'];
+/* 小镇作物按主题长：给一种作物找回它的主题，好借 TM.plant 画 */
+const DOMAIN_OF = { heartberry: '心动', thoughtleaf: '未分类', boltbean: '工作', palettemelon: '创作', tiderice: '远方', velvetgrape: '游戏', lanternplant: '居家', twinpeach: '朋友' };
+let FIELD = [], cropsRoot = null, fieldSig = '', sparkPts = null, signTex = null, signPaint = null;
+const PLOT_HITS = [];
+const cropName = (k) => (TM.SPECIES[k] || {}).zh || Day.cropZh(k);
+/* -1 空地、0 小芽、1 小苗、2 挂果、3 熟了 */
+function plotStage(p, now = Date.now()) { if (!p) return -1; const g = Day.plotProgress(p, now); return g >= 1 ? 3 : g < .25 ? 0 : g < .6 ? 1 : 2; }
+function leftText(p) {
+  const ms = p.plantedAt + p.growMs - Date.now(); if (ms <= 0) return '熟了，点一下收';
+  const m = Math.ceil(ms / 60000), h = Math.floor(m / 60);
+  return m < 2 ? '马上就熟了' : h ? `还要 ${h} 小时${m % 60 ? ' ' + (m % 60) + ' 分' : ''}` : `还要 ${m} 分`;
+}
+function sproutModel(stage, k) {
+  const g = new THREE.Group(), sp = TM.SPECIES[k] || {}, lc = stage ? '#8fb862' : '#a3c873', h = stage ? .2 : .07;
+  const st = new THREE.Mesh(new THREE.CylinderGeometry(.007, .009, h, 5), mat(lc)); st.position.y = h / 2; st.userData.noLine = true; g.add(st);
+  const n = stage ? 4 : 2;
+  for (let i = 0; i < n; i++) { const a = i / n * 6.28 + k, l = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), mat(lc)); l.scale.set(.045, .012, .026); l.position.set(Math.cos(a) * .035, h * (stage ? .35 + i * .15 : .95), Math.sin(a) * .035); l.rotation.set(0, -a, .35); l.userData.lineW = .003; g.add(l); }
+  if (stage === 2) { const b = new THREE.Mesh(new THREE.SphereGeometry(.026, 8, 6), mat(sp.fruit || '#e98aa4')); b.position.y = h + .02; b.scale.set(1, 1.2, 1); b.userData.lineW = .003; g.add(b); }
+  return g;
+}
+function cropModel(p, k) {
+  const st = plotStage(p), kind = p.kind, sp = TM.SPECIES[kind];
+  if (st <= 1) return sproutModel(st, k);   /* 小镇作物的「小苗」是褪了色的样子（那边是记忆快忘了），田里自己画一根绿苗 */
+  if (sp && sp.spec) return SP.plant(sp.spec, st, k);
+  if (kind === 'bloom' && st < 3) return sproutModel(st, k); 
+  if (!DOMAIN_OF[kind] && kind !== 'bloom') return sproutModel(Math.min(st, 2), k);
+  return TM.plant({ kind: kind === 'bloom' ? 'feel' : 'mem', w: st === 2 ? 7 : 10 + (k % 3) * 1.5, domain: [DOMAIN_OF[kind]], id: 'farm' + k }, k);
+}
+function setupField() {
+  TM.useSpecies(Day.seasonSpecs());   /* 南瓜、栗子、柿子登记进小镇的作物表，田里才画得出来 */
+  const nPlots = FIELD_G.COLS * FIELD_G.rows;
+  FIELD = Day.field(nPlots);
+  if (!FIELD) { FIELD = FARM_KINDS.map((d) => ({ kind: TM.cropOf({ kind: 'mem', domain: [d] }), plantedAt: 0, growMs: 0, old: 1 })); Day.saveField(FIELD); while (FIELD.length < nPlots) FIELD.push(null); }
+  const { TS, xz } = FIELD_G;
+  xz.forEach(([x, z], k) => { const h = new THREE.Mesh(new THREE.BoxGeometry(TS - .04, .6, TS - .04), new THREE.MeshBasicMaterial({ visible: false })); h.position.set(x, .3, z); h.userData.plot = k; S.add(h); PLOT_HITS.push(h); });
+  /* 熟了的地头上三颗金点，一闪一闪；一个 Points 画完，省电档跟波光一起收 */
+  const pos = [], ph = [], on = [];
+  xz.forEach(([x, z], k) => { for (let j = 0; j < 3; j++) { const a = k * 2.1 + j * 2.09; pos.push(x + Math.cos(a) * .2, .5 + j * .09, z + Math.sin(a) * .2); ph.push(k * 3.7 + j * 1.9); on.push(0); } });
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('ph', new THREE.Float32BufferAttribute(ph, 1)); g.setAttribute('on', new THREE.Float32BufferAttribute(on, 1));
+  const m = new THREE.ShaderMaterial({ uniforms: { t: { value: 0 }, c: { value: new THREE.Color('#ffe7a0') }, sz: { value: R.getPixelRatio() } }, transparent: true, depthWrite: false,
+    vertexShader: 'attribute float ph, on; uniform float t, sz; varying float a; void main(){ float s = sin(t * 1.3 + ph); a = on * (.35 + .65 * pow(max(s, 0.), 3.)); vec4 mv = modelViewMatrix * vec4(position + vec3(0., .03 * sin(t * .9 + ph), 0.), 1.); gl_PointSize = on * 7. * sz * (.6 + a) * (30. / -mv.z); gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'uniform vec3 c; varying float a; void main(){ vec2 d = gl_PointCoord - .5; float r = abs(d.x) + abs(d.y); float k = smoothstep(.5, .0, r) + smoothstep(.06, .0, abs(d.y)) * smoothstep(.5, .1, abs(d.x)) * .6 + smoothstep(.06, .0, abs(d.x)) * smoothstep(.5, .1, abs(d.y)) * .6; gl_FragColor = vec4(c, min(.9, k * a)); }' });
+  sparkPts = new THREE.Points(g, m); sparkPts.frustumCulled = false; sparkPts.renderOrder = 3; sparkPts.visible = !lowOn(); S.add(sparkPts); GLINTS.push(m); GLINT_PTS.push(sparkPts);
+  fieldSign();
+  rebuildField();
+  setInterval(() => { if (!document.hidden) rebuildField(); }, 30000);   /* 长到下一段了才重盖，没变就什么都不做 */
+}
+/* 田口一块小木牌：熟了几块 / 在长几块 */
+function fieldSign() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 112; const x = c.getContext('2d');
+  const FONT = '40px "MaoKenTangYuan (beta)","PingFang SC",sans-serif';
+  signTex = new THREE.CanvasTexture(c); signTex.colorSpace = THREE.SRGBColorSpace;
+  signPaint = (txt, ripe) => { signPaint.last = [txt, ripe]; x.fillStyle = '#f3e6c8'; x.fillRect(0, 0, 256, 112); x.fillStyle = ripe ? '#9f3726' : '#6e5238'; x.font = FONT; x.textAlign = 'center'; x.fillText(txt, 128, 70); signTex.needsUpdate = true; needFrame = true; };
+  const g = new THREE.Group(), wood = mat('#9a6b4c');
+  g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.04, .42, .04), wood), 0, .21, 0));
+  const board = at(new THREE.Mesh(new THREE.BoxGeometry(.5, .22, .025), [wood, wood, wood, wood, new THREE.MeshBasicMaterial({ map: signTex }), wood]), 0, .42, .022); board.userData.noLine = true; g.add(board);
+  outline(g, { w: .004 }); shadowAll(g);
+  const sx = FIELD_G.x0 - .62, sz = FIELD_G.FZ + .7; g.position.set(sx, HAT(sx, sz), sz); g.rotation.y = -.95; g.scale.setScalar(1.3); S.add(g);
+  document.fonts.load(FONT, '熟了在长块空地0123456789').then(() => { if (signPaint.last) signPaint(...signPaint.last); }).catch(() => {});   /* 字体按字分片懒加载，拉完再写一遍 */
+}
+function rebuildField() {
+  const now = Date.now(), stages = FIELD.map((p) => plotStage(p, now)), sig = FIELD.map((p, k) => p ? p.kind + stages[k] : '-').join(',');
+  if (sig === fieldSig) return; fieldSig = sig;
+  if (cropsRoot) { S.remove(cropsRoot); dropGeos(cropsRoot); }
+  cropsRoot = new THREE.Group();
+  FIELD.forEach((p, k) => {
+    if (!p) return; const [x, z] = FIELD_G.xz[k];
+    try { const pl = cropModel(p, k); pl.position.set(x, .12, z); pl.scale.multiplyScalar(1.35); cropsRoot.add(pl); } catch (e) { console.error(e); }
+  });
+  bake(cropsRoot); outline(cropsRoot); shadowAll(cropsRoot); S.add(cropsRoot);
+  const on = sparkPts.geometry.attributes.on; stages.forEach((st, k) => { for (let j = 0; j < 3; j++) on.setX(k * 3 + j, st === 3 ? 1 : 0); }); on.needsUpdate = true;
+  const ripe = stages.filter((s) => s === 3).length, grow = stages.filter((s) => s >= 0 && s < 3).length;
+  signPaint(ripe ? `熟了 ${ripe} 块` : grow ? `在长 ${grow} 块` : '空 地', ripe > 0);
+  shadowsDirty();
+}
+/* 走到田边才能动地：镜头对着田、离得不远（点田先飞过去，飞到了再点地） */
+function nearField() { const t = CTL.target; return Math.abs(t.x - 10.7) < 5 && Math.abs(t.z + .45) < 4 && CAM.position.distanceTo(t) < 17; }
+const saveField = () => Day.saveField(FIELD);
+function tapPlot(k) {
+  const p = FIELD[k], st = plotStage(p);
+  if (st < 0) { seedCard(k); return; }
+  hideFarmCard();
+  if (st < 3) { toast(`${cropName(p.kind)} · ${leftText(p)}`); return; }
+  /* 一成的机会大丰收，一块收 5 个；老田搬过来的那些照旧 1 个 */
+  const big = !p.old && Math.random() < .1, n = p.old ? 1 : big ? 5 : 1 + Math.floor(Math.random() * 3);
+  Day.addPantry(p.kind, n); FIELD[k] = null; saveField(); rebuildField(); wake();
+  toast(big ? `大丰收！收了 5 个${cropName(p.kind)}` : `收了 ${n} 个${cropName(p.kind)}`);
+}
+let farmCard = null;
+function hideFarmCard() { if (farmCard) farmCard.hidden = true; }
+function farmCardEl() {
+  if (farmCard) return farmCard;
+  const st = document.createElement('style');
+  st.textContent = `#farmCard{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 86px);z-index:8;background:rgba(255,252,246,.95);border-radius:18px;padding:10px 12px 10px;box-shadow:0 14px 40px -16px rgba(80,50,40,.45),0 0 0 .5px rgba(90,60,50,.15);transform:rotate(.3deg);color:#5b4a44;max-height:46vh;overflow-y:auto}
+#farmCard[hidden]{display:none}
+#farmCard h3{font-size:11px;font-weight:400;letter-spacing:.3em;color:#a8968c;margin:2px 2px 6px}
+#farmCard .row{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;margin:0 0 6px;border:0;border-radius:14px;background:#fff;color:#5b4a44;font:inherit;font-size:13px;box-shadow:0 0 0 .5px rgba(90,60,50,.18);text-align:left}
+#farmCard .row i{display:inline-block;width:9px;height:9px;border-radius:50%;box-shadow:0 0 0 .5px rgba(90,60,50,.25)}
+#farmCard .row small{margin-left:auto;font-size:11px;color:#a8968c}
+#farmCard p{font-size:12px;color:#a8968c;letter-spacing:.08em;margin:2px 2px 6px}
+#farmCard .btns{display:flex;gap:10px;justify-content:flex-end}
+#farmCard .btns button{padding:6px 16px;border-radius:16px;border:0;background:#fff;color:#5b4a44;font:inherit;font-size:13px;box-shadow:0 0 0 .5px rgba(90,60,50,.18)}
+#farmCard .btns button.yes{background:#9f3726;color:#fbf7ef}
+#farmCard .x{position:absolute;right:8px;top:4px;border:0;background:none;color:#a8968c;font-size:18px}`;
+  document.head.appendChild(st);
+  farmCard = document.createElement('div'); farmCard.id = 'farmCard'; farmCard.hidden = true; document.body.appendChild(farmCard);
+  return farmCard;
+}
+/* 点空地：口袋里有什么菜种子，点一样种一粒 */
+function seedCard(k) {
+  const el = farmCardEl(), bag = Day.cropSeeds(), ks = Object.keys(bag).filter((x) => bag[x] > 0);
+  el.innerHTML = '<button class="x">×</button><h3>种 一 粒</h3>';
+  el.querySelector('.x').onclick = hideFarmCard;
+  if (!ks.length) el.insertAdjacentHTML('beforeend', '<p>口袋里没有菜种子。<a href="shop.html?seeds" style="color:#9f3726">去店里买</a>，买来的种子进口袋，再来这儿种</p>');
+  for (const id of ks) {
+    const b = document.createElement('button'); b.className = 'row';
+    b.innerHTML = `<i style="background:${(TM.SPECIES[id] || {}).fruit || '#b9cf8f'}"></i>${cropName(id)} <span style="opacity:.6">× ${bag[id]}</span><small>${Day.GROW_H[id] || 4} 小时熟</small>`;
+    b.onclick = () => {
+      if (FIELD[k] || !Day.useCropSeed(id)) { hideFarmCard(); return; }
+      FIELD[k] = { kind: id, plantedAt: Date.now(), growMs: Day.growMs(id) }; saveField(); rebuildField(); wake(); hideFarmCard();
+      toast(`种下一粒${cropName(id)}，${Day.GROW_H[id] || 4} 小时后熟`);
+    };
+    el.appendChild(b);
+  }
+  el.hidden = false;
+}
+/* 长按一块：问一声再拔，种子不退 */
+function pullCard(k) {
+  const p = FIELD[k]; if (!p) { seedCard(k); return; }
+  const el = farmCardEl();
+  el.innerHTML = `<h3>拔 掉 ？</h3><p>${cropName(p.kind)} · ${leftText(p)}。拔了种子不退</p><div class="btns"><button>算了</button><button class="yes">拔掉</button></div>`;
+  const [no, yes] = el.querySelectorAll('.btns button');
+  no.onclick = hideFarmCard;
+  yes.onclick = () => { FIELD[k] = null; saveField(); rebuildField(); wake(); hideFarmCard(); toast('拔掉了，地空出来了'); };
+  el.hidden = false;
+}
+
+const EXPAND_KEY = 'diarytown_expand';
+const EXP = [
+  { id: 'vase3', zh: '花瓶位 +1', about: '花架前沿再留一个花位，能摆第三盆', p: 600, lv: 1, vase: 3 },
+  { id: 'field1', zh: '田加一排', about: '田往南多翻一排，六块地', p: 900, lv: 1, row: 1 },
+  { id: 'sink', zh: '洗手台', about: '田口栅栏边一座石头洗手台，收完菜洗洗手', p: 1100, lv: 2, at: [7.7, -1.3], rot: -Math.PI / 2, r: .55, box: [7.2, 8.0, -1.8, -.8] },
+  { id: 'vase4', zh: '花瓶位 +1', about: '小桌边的木平台上再留一个花位', p: 1200, lv: 2, vase: 4, need: 'vase3' },
+  { id: 'basin', zh: '小水池', about: '园子往东南扩出去一块，新园子路中间一口圆石沿的小池子，养几片睡莲', p: 1400, lv: 2, at: [3.7, 4.4], rot: 0, r: .8, room: 1 },
+  { id: 'field2', zh: '田再加一排', about: '再翻一排六块，一共三十块地', p: 1600, lv: 3, row: 2, need: 'field1' },
+  { id: 'pergola', zh: '花架', about: '园子往东南扩出去一块，新园子尽头爬满玫瑰的木花架，底下一张长椅', p: 2200, lv: 3, at: [5.25, 2.85], rot: 0, r: 1, room: 1 },
+  { id: 'vase5', zh: '花瓶位 +1', about: '小桌边再一个，五盆摆满', p: 2600, lv: 4, vase: 5, need: 'vase4' },
+  { id: 'swing', zh: '秋千墙', about: '园子往东南扩出去一块，新园子尽头一面爬着常春藤的白花砖墙，挂一架木秋千', p: 3000, lv: 5, at: [5.97, 4.4], rot: -Math.PI / 2, r: 1.15, room: 1 },
+];
+const SIGN = { x: .25, z: 3.85 };
+/* 新园子：老园子东南角外一块圆角方地，北边和西北边贴着老园子的篱笆；拱门开在老池子正南，跟老池子一条线 */
+const ROOM = { x0: 1.8, x1: 6.3, z0: 2.2, z1: 6.1, c: .5, top: .09 };
+const ARCH = { x: POND.x, z: 3.3, half: .36 };
+const AXIS_Z = 4.4;   /* 进门往南走到这儿往东拐，池子、石子地、秋千都在这条线上 */
+const SQUARE = { x0: 4.7, x1: 5.8, z0: 3.7, z1: 5.1 };
+let ROOM_ON = false;
+const inRoom = (x, z, pad = 0) => x > ROOM.x0 - pad && x < ROOM.x1 + pad && z > ROOM.z0 - pad && z < ROOM.z1 + pad && !inPoly(x, z);
+/* 新园子底下的地压平：方地里和边上 .6 以内不高过 0，再往外慢慢接回原来的坡，网格粗也顶不穿草皮板 */
+function roomCarve(x, z) { const dx = Math.max(0, ROOM.x0 - x, x - ROOM.x1), dz = Math.max(0, ROOM.z0 - z, z - ROOM.z1), d = Math.hypot(dx, dz); return d < .6 ? 0 : (d - .6) * .4; }
+function roomShape() {
+  const s = new THREE.Shape(), { x0, x1, z0, z1, c } = ROOM;
+  s.moveTo(x0, 3.3); s.lineTo(3.0, 3.3); s.quadraticCurveTo(4.1, 3.3, 4.1, 2.2);
+  s.lineTo(x1 - c, z0); s.quadraticCurveTo(x1, z0, x1, z0 + c); s.lineTo(x1, z1 - c); s.quadraticCurveTo(x1, z1, x1 - c, z1);
+  s.lineTo(x0 + c, z1); s.quadraticCurveTo(x0, z1, x0, z1 - c); s.lineTo(x0, 3.3);
+  return s;
+}
+/* 新园子自己的篱笆：从老园子东篱笆的拐角绕一圈到老园子前篱笆，跟老篱笆接上 */
+function roomFencePath() {
+  const p = new THREE.Path(), { x0, x1, z0, z1, c } = ROOM;
+  p.moveTo(4.1, z0); p.lineTo(x1 - c, z0); p.quadraticCurveTo(x1, z0, x1, z0 + c); p.lineTo(x1, z1 - c); p.quadraticCurveTo(x1, z1, x1 - c, z1);
+  p.lineTo(x0 + c, z1); p.quadraticCurveTo(x0, z1, x0, z1 - c); p.lineTo(x0, 3.3);
+  return p;
+}
+let EXPS = {}, EXP_DONE = [], DIARY_DAYS = 0, expSheet = null;
+const EXP_HITS = [], EXP_GLOW = [];
+const expQ = () => Q.get('expand') || '';
+const expState = (id) => { const q = expQ(); if (q === 'all') return 'built'; if (q === 'site') return 'building'; if (q) return q.split(',').includes(id) ? 'built' : null; return EXPS[id] && EXPS[id].state || null; };
+const expSave = () => { if (expQ()) return; try { localStorage.setItem(EXPAND_KEY, JSON.stringify(EXPS)); } catch (e) {} };
+/* 进门先对一遍：过了早上六点的算建好；花位个数、田几排跟着定 */
+function settleExpand() {
+  try { EXPS = JSON.parse(localStorage.getItem(EXPAND_KEY) || '{}') || {}; } catch (e) { EXPS = {}; }
+  const now = Date.now();
+  if (!expQ()) for (const e of EXP) { const s = EXPS[e.id]; if (s && s.state === 'building' && now >= s.doneAt) { s.state = 'built'; s.builtAt = now; EXP_DONE.push(e); } }
+  if (EXP_DONE.length) expSave();
+  const n = 2 + EXP.filter((e) => e.vase && expState(e.id) === 'built').length;
+  if (!expQ()) { try { if ((+localStorage.getItem('diarytown_vase_slots') || 0) < n) localStorage.setItem('diarytown_vase_slots', String(n)); } catch (e) {} }
+  FIELD_G.rows = 3 + EXP.filter((e) => e.row && expState(e.id) === 'built').length;
+  FIELD_G.rowsLand = 3 + EXP.filter((e) => e.row && expState(e.id)).length;   /* 在施工的那排也先把地压平 */
+  ROOM_ON = EXP.some((e) => e.room && expState(e.id));
+  if (ROOM_ON) {
+    PAN_BOX.z1 = 6.6;   /* 镜头能拖到新园子底下 */
+    for (let z = 2.3; z <= 3.3; z += .1) PATH_PTS.push(new THREE.Vector3(ARCH.x, 0, z));   /* 老池子到拱门那几块踏步石，种花让开 */
+  }
+}
+const expDoneText = (e) => e.vase ? `花瓶位建好了，园子里能摆 ${e.vase} 盆` : e.row ? '田加了一排，多了 6 块地' : `${e.zh}建好了`;
+/* 岛上的田那块平地：加了几排就往南多压平几排 */
+function isleRects() { const ex = FIELD_G.rowsLand > 3 ? (FIELD_G.rowsLand - 3) * FIELD_G.TS + .6 : 0; return ISLE_RECTS.map((r, i) => i === 1 ? [r[0], r[1] + ex / 2, r[2], r[3] + ex / 2] : r); }   /* 多压 .6，田底下那块土垫的南边也落在平地上 */
+/* 写过日记的天数（野花、盆边冒的苗不算）；七天一级 */
+function countDiaryDays(list) { DIARY_DAYS = new Set((list || []).filter((f) => !f.wild && !f.hybrid && f.mood && f.at).map((f) => Day.dayKey(f.at))).size; }
+const gardenLevel = () => Math.floor(DIARY_DAYS / 7);
+/* 田加的那一排在哪儿：[x0, x1, z0, z1] */
+function rowBox(row) { const { COLS, ROWS, TS, FX, FZ } = FIELD_G, z0 = FZ - ROWS * TS / 2 + (2 + row) * TS; return [FX - COLS * TS / 2, FX + COLS * TS / 2, z0, z0 + TS]; }
+/* 一样东西占的地，园子外面的野花草丛、自己种的花丛都让开 */
+function expFoot(e) {
+  if (e.room) return (x, z) => inRoom(x, z, .35);   /* 新园子整块（连篱笆外一圈）都让开 */
+  if (e.box) { const [a, b, c, d] = e.box; return (x, z) => x > a && x < b && z > c && z < d; }
+  if (e.at) { const [cx, cz] = e.at; return (x, z) => Math.hypot(x - cx, z - cz) < e.r; }
+  if (e.row) { const [a, b, c, d] = rowBox(e.row); return (x, z) => x > a - .65 && x < b + 1.1 && z > c - .1 && z < d + .8; }   /* 连田底下那块土垫 */
+  return null;
+}
+function expBlockers() { const out = [(x, z) => Math.hypot(x - SIGN.x, z - SIGN.z) < .32]; for (const e of EXP) if (expState(e.id)) { const f = expFoot(e); if (f) out.push(f); } return out; }
+
+/* —— 样子：都是小件拼的，盖好以后跟园子一起 bake 成几张网格 —— */
+const EXP_C = { wood: '#b98d62', woodD: '#9a6b4c', stone: '#e6dccb', stoneD: '#d2c6b0', cream: '#f1e8d8', cushion: '#f3e7d1', terra: '#c8714a' };
+let GLOW_TEX = null;
+function glowTex() {
+  if (GLOW_TEX) return GLOW_TEX;
+  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.35, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return GLOW_TEX = new THREE.CanvasTexture(c);
+}
+/* 夜里灯脚下一团暖光：不加点光源（着色器不重编），一张淡淡的加色圆片 */
+function glowDisc(g, x, y, z, r) {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(r, 24), new THREE.MeshBasicMaterial({ map: glowTex(), color: '#ffb468', transparent: true, opacity: .5, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+  m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.userData.noLine = true; m.userData.noCast = true; m.visible = false; m.renderOrder = 2; g.add(m); EXP_GLOW.push(m);
+}
+const lampGlassM = () => mat('#fff3d6', { emissive: new THREE.Color('#ffb060'), emissiveIntensity: .25 });   /* 跟园子里那几盏灯同一份材质，夜里一起亮 */
+function lantern(g, x, y, z, s = 1) {
+  const gl = new THREE.Mesh(new THREE.BoxGeometry(.08 * s, .1 * s, .08 * s), lampGlassM()); gl.position.set(x, y, z); gl.userData.lineW = .004; g.add(gl);
+  g.add(at(new THREE.Mesh(new THREE.ConeGeometry(.075 * s, .05 * s, 4), mat(C.iron)), x, y + .075 * s, z));
+}
+/* 施工的地方：四角木桩拉一圈橙白相间的施工带，一摞木板、一小堆土，一根桩上挂马灯 */
+function buildSite(g, w, d, s = 1) {
+  const post = mat('#c9a77a'), tapeA = mat('#eda23e'), tapeB = mat('#fbf6ec');
+  const cs = [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]];
+  cs.forEach(([x, z]) => { const p = new THREE.Mesh(new THREE.BoxGeometry(.045 * s, .5 * s, .045 * s), post); p.position.set(x, .25 * s, z); p.userData.lineW = .003; g.add(p); });
+  cs.forEach(([ax, az], i) => {
+    const [bx, bz] = cs[(i + 1) % 4], len = Math.hypot(bx - ax, bz - az), n = Math.max(2, Math.round(len / (.12 * s))), ang = Math.atan2(bz - az, bx - ax);
+    for (let j = 0; j < n; j++) { const t = (j + .5) / n, sag = Math.sin(t * Math.PI) * .04 * s, tp = new THREE.Mesh(new THREE.BoxGeometry(len / n + .002, .035 * s, .006), j % 2 ? tapeA : tapeB); tp.position.set(ax + (bx - ax) * t, .4 * s - sag, az + (bz - az) * t); tp.rotation.y = -ang; tp.userData.noLine = true; g.add(tp); }
+  });
+  const px = -w / 2 + .38 * s, pz = d / 2 - .2 * s;
+  for (let i = 0; i < 3; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(.6 * s, .03 * s, .1 * s), mat(i % 2 ? '#c99d70' : '#b98d62')); b.position.set(px + (i - 1) * .015 * s, .016 * s + i * .031 * s, pz - i * .02 * s); b.rotation.y = (i - 1) * .12; b.userData.lineW = .003; g.add(b); }
+  const dirt = new THREE.Mesh(new THREE.IcosahedronGeometry(.16 * s, 1), mat('#bfa57a')); dirt.scale.set(1.2, .4, 1); dirt.position.set(w / 2 - .25 * s, .03 * s, -d / 2 + .25 * s); dirt.userData.lineW = .004; g.add(dirt);
+  const sh = new THREE.Mesh(new THREE.BoxGeometry(.03 * s, .34 * s, .012 * s), mat(C.wood)); sh.position.set(w / 2 - .15 * s, .2 * s, -d / 2 + .3 * s); sh.rotation.z = .35; sh.userData.lineW = .003; g.add(sh);   /* 插在土里的一把铲子 */
+  const lp = new THREE.Mesh(new THREE.BoxGeometry(.045 * s, .72 * s, .045 * s), post); lp.position.set(w / 2, .36 * s, d / 2); lp.userData.lineW = .003; g.add(lp);
+  g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.18 * s, .03 * s, .03 * s), post), w / 2 - .07 * s, .7 * s, d / 2));
+  lantern(g, w / 2 - .13 * s, .6 * s, d / 2, s);
+  glowDisc(g, w / 2 - .13 * s, .02, d / 2, .75 * Math.max(s, .6));
+}
+/* 花架：原木四根柱、两道梁、一排椽子，上头和前面两根柱爬满玫瑰，底下一张铺了垫子的长椅，梁下吊一盏灯 */
+function buildPergola(g) {
+  const wd = mat(EXP_C.wood), W = 1.3, D = .9, H = 1.05;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(W + .3, .02, D + .3), mat('#e9e1d2')); base.position.y = .01; base.userData.noLine = true; g.add(base);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.08, H, .08), wd), x * W / 2, H / 2, z * D / 2));
+  for (const z of [-1, 1]) g.add(at(new THREE.Mesh(new THREE.BoxGeometry(W + .3, .07, .07), wd), 0, H + .035, z * D / 2));
+  for (let i = 0; i < 7; i++) g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.045, .05, D + .3), wd), -W / 2 - .05 + i * (W + .1) / 6, H + .095, 0));
+  let k = 5; const r = () => ((k = (k * 9301 + 49297) % 233280) / 233280);
+  const ROSE = ['#f2a7bd', '#e9839f', '#f7c6d3', '#fbf6ec'];
+  const clump = (x, y, z, rad, fl) => { const l = new THREE.Mesh(new THREE.IcosahedronGeometry(rad, 0), mat(r() < .5 ? G.leaf : G.leafD)); l.position.set(x, y, z); l.scale.y = .8; l.userData.lineW = .004; g.add(l); for (let j = 0; j < fl; j++) { const a = r() * 6.28, e = r() * 1.2 - .2, f = new THREE.Mesh(new THREE.IcosahedronGeometry(.032 + r() * .014, 0), mat(ROSE[Math.floor(r() * ROSE.length)])); f.position.set(x + Math.cos(a) * Math.cos(e) * rad, y + Math.sin(e) * rad * .8, z + Math.sin(a) * Math.cos(e) * rad); f.userData.noLine = true; g.add(f); } };
+  for (let i = 0; i < 22; i++) { const x = (r() - .5) * (W + .25), z = (r() - .5) * (D + .2); clump(x, H + .13 + r() * .05, z, .07 + r() * .06, 2); }
+  for (const sx of [-1, 1]) for (let i = 0; i < 7; i++) { const y = .12 + i * .14; clump(sx * W / 2 + (r() - .5) * .08, y, D / 2 + (r() - .5) * .08, .055 + r() * .03, i % 2 ? 2 : 1); }
+  for (let i = 0; i < 6; i++) clump(W / 2 - .1 - r() * .3, H - .05 - r() * .15, D / 2 + .02, .05, 1);   /* 从梁上垂下来几枝 */
+  const bench = new THREE.Group(); bench.position.set(0, 0, -.18);
+  bench.add(at(new THREE.Mesh(new THREE.BoxGeometry(.82, .045, .26), mat(EXP_C.woodD)), 0, .24, 0));
+  bench.add(at(new THREE.Mesh(new THREE.BoxGeometry(.82, .22, .035), mat(EXP_C.woodD)), 0, .4, -.12));
+  for (const x of [-.36, .36]) bench.add(at(new THREE.Mesh(new THREE.BoxGeometry(.045, .24, .24), mat('#7c5639')), x, .12, 0));
+  bench.add(at(new THREE.Mesh(new RoundedBoxGeometry(.74, .045, .22, 2, .015), mat(EXP_C.cushion)), 0, .285, .01));
+  for (const x of [-.24, .24]) { const pl = new THREE.Mesh(new RoundedBoxGeometry(.17, .14, .05, 2, .02), mat(x < 0 ? '#e9b8c4' : '#f3e7d1')); pl.position.set(x, .37, -.08); pl.rotation.x = -.2; bench.add(pl); }
+  g.add(bench);
+  lantern(g, .35, H - .14, D / 2 - .05, .9); g.add(at(new THREE.Mesh(new THREE.CylinderGeometry(.004, .004, .1, 4), mat(C.iron)), .35, H - .04, D / 2 - .05));
+  glowDisc(g, .35, .03, D / 2 - .05, .8);
+}
+/* 小水池：一圈圆石沿，浅水渐变，三片睡莲两朵花，后沿一丛鸢尾 */
+function buildBasin(g, wx, wz) {
+  const R0 = .42, n = 14, cm = [mat(EXP_C.stone), mat(EXP_C.stoneD)];
+  for (let i = 0; i < n; i++) { const a = (i + .5) / n * 6.28, w = R0 * 6.28 / n * 1.04, st = new THREE.Mesh(new RoundedBoxGeometry(w, .13, .15, 2, .025), cm[i % 2]); st.position.set(Math.cos(a) * (R0 + .06), .065, Math.sin(a) * (R0 + .06)); st.rotation.y = -a + Math.PI / 2; st.userData.lineW = .004; g.add(st); }
+  const wc = document.createElement('canvas'); wc.width = wc.height = 64; const x = wc.getContext('2d'), gr = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+  gr.addColorStop(0, '#5fa9b6'); gr.addColorStop(.6, '#7fc2c6'); gr.addColorStop(.88, '#bfe3dc'); gr.addColorStop(1, '#e4f2ea'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  const wt = new THREE.CanvasTexture(wc); wt.colorSpace = THREE.SRGBColorSpace;
+  const water = new THREE.Mesh(new THREE.CircleGeometry(R0 + .01, 28), new THREE.MeshBasicMaterial({ map: wt })); water.rotation.x = -Math.PI / 2; water.position.y = .1; water.userData.noLine = true; g.add(water);
+  for (const [a, d, r0, fl] of [[.6, .2, .08, '#fbf6ec'], [2.5, .24, .07, '#f6b8c8'], [4.1, .18, .06, null]]) {
+    const lp = new THREE.Mesh(new THREE.CircleGeometry(r0, 12, .3, 5.8), mat('#5f9a52', { side: THREE.DoubleSide })); lp.rotation.x = -Math.PI / 2; lp.rotation.z = a; lp.position.set(Math.cos(a) * d, .108, Math.sin(a) * d); lp.userData.noLine = true; g.add(lp);
+    if (fl) for (let j = 0; j < 5; j++) { const pt = new THREE.Mesh(new THREE.IcosahedronGeometry(.022, 0), mat(fl)); pt.scale.set(1, .55, 1.6); const b = j / 5 * 6.28; pt.position.set(Math.cos(a) * d + Math.cos(b) * .022, .13, Math.sin(a) * d + Math.sin(b) * .022); pt.rotation.y = -b; pt.userData.noLine = true; g.add(pt); }
+  }
+  const iris = bladeTuft(.32, 7);
+  for (const a of [-1.9, -1.4]) { const m = new THREE.Mesh(iris, mat('#5f9a6a', { side: THREE.DoubleSide })); m.position.set(Math.cos(a) * (R0 + .2), .02, Math.sin(a) * (R0 + .2)); g.add(m); for (let j = 0; j < 2; j++) { const h = new THREE.Mesh(IcoG(.026), mat('#6f5fd0')); h.position.set(m.position.x + (j - .5) * .05, .3 + j * .03, m.position.z); h.userData.noLine = true; g.add(h); } }
+  const pts = []; for (let i = 0; i < 6; i++) { const a = i * 1.7 + .4, d = (i % 3 + 1) * .1; pts.push(wx + Math.cos(a) * d, ROOM.top + .13, wz + Math.sin(a) * d); } glints(pts, 5);
+}
+const IcoG = (r) => new THREE.IcosahedronGeometry(r, 0);
+/* 秋千墙：一面白花砖墙（参考图那种镂空砖，左边一截实心墙垛），木压顶往前挑出两根托梁，挂一架带软垫的木秋千；
+   墙上两头爬常春藤、右边开白蔷薇，墙脚一只陶罐几支薰衣草，秋千底下一块石板 */
+function breezeTex() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 160; const x = c.getContext('2d');
+  x.fillStyle = '#f3ece0'; x.fillRect(0, 0, 256, 160);
+  const bw = 32, bh = 32, x0 = 64;
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 5; j++) {
+    const px = x0 + i * bw, py = j * bh; x.fillStyle = '#ddd2bf';
+    x.fillRect(px + 5, py + 5, 9, 9); x.fillRect(px + 18, py + 5, 9, 9); x.fillRect(px + 5, py + 18, 9, 9); x.fillRect(px + 18, py + 18, 9, 9);
+    x.fillStyle = '#c9bca5'; x.fillRect(px + 7, py + 7, 5, 5); x.fillRect(px + 20, py + 7, 5, 5); x.fillRect(px + 7, py + 20, 5, 5); x.fillRect(px + 20, py + 20, 5, 5);
+  }
+  x.fillStyle = 'rgba(160,140,110,.25)'; x.fillRect(x0 - 2, 0, 2, 160);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function buildSwing(g) {
+  const W = 1.7, H = 1.05, T0 = .18, wood = mat(EXP_C.woodD);
+  const wallM = mat('#ffffff', { map: breezeTex() }), plain = mat(EXP_C.cream);
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(W, H, T0), [plain, plain, plain, plain, wallM, plain]); wall.position.y = H / 2; wall.userData.lineW = .006; wall.userData.keep = true; g.add(wall);
+  g.add(at(new THREE.Mesh(new THREE.BoxGeometry(W + .12, .06, T0 + .1), wood), 0, H + .03, 0));
+  const sx = .38, out = .62;
+  for (const s of [-1, 1]) g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.06, .07, out + .1), wood), s * sx + .15, H + .02, out / 2));
+  const ropeM = mat('#c9b48a');
+  for (const s of [-1, 1]) { const rp = new THREE.Mesh(new THREE.CylinderGeometry(.007, .007, .58, 4), ropeM); rp.position.set(s * (sx - .04) + .15, H - .29, out - .02); rp.userData.noLine = true; g.add(rp); }
+  const seat = new THREE.Group(); seat.position.set(.15, .42, out - .02);
+  seat.add(at(new THREE.Mesh(new THREE.BoxGeometry(.72, .045, .28), mat(EXP_C.wood)), 0, 0, 0));
+  seat.add(at(new THREE.Mesh(new THREE.BoxGeometry(.72, .2, .03), mat(EXP_C.wood)), 0, .13, -.13));
+  for (const s of [-1, 1]) seat.add(at(new THREE.Mesh(new THREE.BoxGeometry(.03, .1, .26), mat(EXP_C.wood)), s * .35, .07, 0));
+  seat.add(at(new THREE.Mesh(new RoundedBoxGeometry(.64, .05, .24, 2, .02), mat(EXP_C.cushion)), 0, .045, .01));
+  g.add(seat);
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(1.0, .025, .62), mat('#e2dccd')); pad.position.set(.15, .012, out - .02); pad.userData.lineW = .004; g.add(pad);
+  let k = 11; const r = () => ((k = (k * 9301 + 49297) % 233280) / 233280);
+  const leafy = (x, y, rad, fl) => { const l = new THREE.Mesh(new THREE.IcosahedronGeometry(rad, 0), mat(r() < .55 ? G.leafD : G.leaf)); l.scale.z = .55; l.position.set(x, y, T0 / 2 + .02); l.userData.noLine = true; g.add(l); if (fl) { const f = new THREE.Mesh(IcoG(.03), mat('#fbfaf4')); f.position.set(x + (r() - .5) * .06, y + .02, T0 / 2 + .07); f.userData.noLine = true; g.add(f); } };
+  for (let i = 0; i < 26; i++) { const y = Math.pow(r(), .7) * (H + .05); leafy(-W / 2 + r() * .4, y, .06 + r() * .04, false); }   /* 左边墙垛上的常春藤 */
+  for (let i = 0; i < 22; i++) { const y = .1 + r() * (H - .05); leafy(W / 2 - r() * .35, y, .06 + r() * .04, r() < .6); }   /* 右边爬白蔷薇 */
+  for (let i = 0; i < 10; i++) leafy(-W / 2 + .3 + r() * (W - .5), H - .02 - r() * .18, .05 + r() * .03, false);   /* 压顶下垂一溜 */
+  const terra = mat(EXP_C.terra), urnPts = [[0, 0], [.08, 0], [.12, .06], [.15, .16], [.13, .27], [.08, .32], [.1, .36], [0, .36]].map(([a, b]) => new THREE.Vector2(a * .9, b * .9));
+  const urn = new THREE.Mesh(new THREE.LatheGeometry(urnPts, 12), terra); urn.position.set(-W / 2 + .12, 0, .32); urn.userData.lineW = .005; g.add(urn);
+  const lav = floretSpike(.3, .022, 6);
+  for (let i = 0; i < 5; i++) { const m = new THREE.Mesh(lav, mat(i % 2 ? '#9a86c4' : '#8a74b8')); m.position.set(W / 2 - .15 + (i % 3 - 1) * .08, 0, .3 + Math.floor(i / 3) * .1); m.rotation.set((r() - .5) * .3, r() * 3, (r() - .5) * .3); g.add(m); }
+}
+/* 洗手台：米白石板做背墙，挖一道拱形的龛，龛里一根黑铁水龙头；底下一整块粗石墩，上面一只深色石盆；旁边一只陶罐、一把喷壶 */
+function buildSink(g) {
+  const back = new THREE.Mesh(new THREE.BoxGeometry(.66, 1.0, .12), mat(EXP_C.cream)); back.position.set(0, .5, -.12); back.userData.lineW = .006; g.add(back);
+  const niche = new THREE.Mesh(new THREE.ShapeGeometry(archShape(.38, .5), 12), mat('#d9cbb3')); niche.position.set(0, .42, -.058); niche.userData.noLine = true; g.add(niche);
+  const block = new THREE.Mesh(new RoundedBoxGeometry(.52, .42, .34, 2, .03), mat('#ffffff', { map: washTex('#e3d6bd', { blots: 18, seed: 9 }) })); block.position.set(0, .21, .04); block.userData.lineW = .006; g.add(block);
+  const bowl = new THREE.Mesh(new THREE.LatheGeometry([[0, 0], [.08, 0], [.15, .035], [.18, .075], [.175, .085], [.15, .05], [0, .04]].map(([a, b]) => new THREE.Vector2(a, b)), 16), mat('#3e3835', { side: THREE.DoubleSide })); bowl.position.set(0, .42, .04); bowl.userData.lineW = .004; g.add(bowl);
+  const iron = mat(C.iron);
+  g.add(at(new THREE.Mesh(new THREE.CylinderGeometry(.011, .011, .22, 6), iron), 0, .72, -.045));
+  const sp = new THREE.Mesh(new THREE.CylinderGeometry(.01, .01, .11, 6), iron); sp.rotation.x = Math.PI / 2; sp.position.set(0, .61, .005); g.add(sp);
+  g.add(at(new THREE.Mesh(new THREE.CylinderGeometry(.01, .01, .05, 6), iron), 0, .585, .055));
+  g.add(at(new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, .015, 8), iron), 0, .84, -.045));
+  const urnPts = [[0, 0], [.08, 0], [.12, .06], [.15, .16], [.13, .27], [.08, .32], [.1, .36], [0, .36]].map(([a, b]) => new THREE.Vector2(a * .75, b * .75));
+  const urn = new THREE.Mesh(new THREE.LatheGeometry(urnPts, 12), mat(EXP_C.terra)); urn.position.set(-.42, 0, .02); urn.userData.lineW = .005; g.add(urn);
+  const can = new THREE.Group(); can.position.set(.38, 0, .22); can.rotation.y = -.6;
+  can.add(at(new THREE.Mesh(new THREE.CylinderGeometry(.06, .07, .13, 10), mat('#8fa9a4')), 0, .065, 0));
+  const spout = new THREE.Mesh(new THREE.CylinderGeometry(.008, .012, .16, 5), mat('#8fa9a4')); spout.rotation.z = -.9; spout.position.set(.1, .1, 0); can.add(spout);
+  const hd = new THREE.Mesh(new THREE.TorusGeometry(.045, .008, 4, 10, Math.PI), mat('#8fa9a4')); hd.position.set(0, .13, 0); can.add(hd);
+  g.add(can);
+}
+/* 大门左边篱笆外那块木牌 */
+function expSign(world) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 112; const x = c.getContext('2d');
+  const FONT = '46px "MaoKenTangYuan (beta)","PingFang SC",sans-serif', tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const paint = () => { x.fillStyle = '#f3e6c8'; x.fillRect(0, 0, 256, 112); x.fillStyle = '#9f3726'; x.font = FONT; x.textAlign = 'center'; x.fillText('扩 建', 128, 72); tex.needsUpdate = true; needFrame = true; };
+  paint(); document.fonts.load(FONT, '扩建').then(paint).catch(() => {});
+  const g = new THREE.Group(), wood = mat('#9a6b4c');
+  g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.04, .46, .04), wood), 0, .23, 0));
+  const board = at(new THREE.Mesh(new THREE.BoxGeometry(.46, .2, .025), [wood, wood, wood, wood, new THREE.MeshBasicMaterial({ map: tex }), wood]), 0, .44, .022); board.userData.noLine = true; g.add(board);
+  g.add(at(new THREE.Mesh(new THREE.BoxGeometry(.5, .03, .06), wood), 0, .555, .02));
+  const y0 = HAT(SIGN.x, SIGN.z); g.position.set(SIGN.x, Math.max(0, y0), SIGN.z); g.rotation.y = -1.0; g.scale.setScalar(1.3); world.add(g);
+  const hit = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, 1, 8), new THREE.MeshBasicMaterial({ visible: false })); hit.position.set(SIGN.x, .5, SIGN.z); S.add(hit); EXP_HITS.push(hit);
+}
+/* 一样东西摆到它的地方：建好了画本体，在施工画工地 */
+function expPlace(e, st) {
+  const g = new THREE.Group();
+  if (e.vase) {
+    const [x, z] = Day.VASE_SPOTS[e.vase - 1]; g.position.set(x, x > 0 ? .145 : .14, z);
+    if (st === 'building') buildSite(g, .38, .34, .45);
+  } else if (e.row) {
+    const [a, b, c, d] = rowBox(e.row); g.position.set((a + b) / 2, HAT((a + b) / 2, (c + d) / 2), (c + d) / 2);
+    if (st === 'building') { const soil = new THREE.Mesh(new THREE.BoxGeometry(b - a - .1, .03, d - c - .1), mat('#a2805c')); soil.position.y = .03; soil.userData.lineW = .004; g.add(soil); buildSite(g, b - a + .1, d - c + .1, 1); }
+  } else {
+    const [x, z] = e.at; g.rotation.y = e.rot || 0;
+    if (e.room) g.position.set(x, ROOM.top, z);   /* 新园子的草皮板是平的 */
+    else {
+      /* 不在平地上的（洗手台）：量一遍脚下一圈的高低，按最高处放，底下垫一块往下伸到最低处的石板，接缝藏在石板里 */
+      const [a, b, c, d] = e.box; let hi = -1, lo = 1;
+      for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) { const h = HAT(a + (b - a) * i / 6, c + (d - c) * j / 6); hi = Math.max(hi, h); lo = Math.min(lo, h); }
+      const y0 = Math.max(hi, .045) + .005, th = y0 - lo + .06;
+      g.position.set(x, y0, z);
+      const pl = new THREE.Mesh(new THREE.BoxGeometry(.9, th, .7), mat('#e2dccd')); pl.position.set(.05, .025 - th / 2, .05); pl.userData.lineW = .004; g.add(pl);
+      g.userData.lift = .025;
+    }
+    if (st === 'building') buildSite(g, e.r * 1.35, e.r * 1.1, 1);
+    else if (e.id === 'pergola') buildPergola(g);
+    else if (e.id === 'basin') buildBasin(g, x, z);
+    else if (e.id === 'swing') buildSwing(g);
+    else if (e.id === 'sink') { const k = new THREE.Group(); k.position.y = g.userData.lift || 0; buildSink(k); g.add(k); }
+  }
+  g.userData.exp = e.id; return g;
+}
+/* 新园子：草皮板、自己的白篱笆、老池子正南的拱门、路（进门往南，拐弯往东过池子到石子地）、沿边一圈灌木 */
+function buildRoom(world) {
+  let k = 37; const r = () => ((k = (k * 9301 + 49297) % 233280) / 233280);
+  const T0 = ROOM.top;
+  const lg = new THREE.ExtrudeGeometry(roomShape(), { depth: .22, bevelEnabled: false, curveSegments: 16 }); lg.rotateX(Math.PI / 2); lg.translate(0, T0, 0);
+  const lawn = new THREE.Mesh(lg, wash(G.grass, { rep: [.11, .11], seed: 2, blots: 22 })); lawn.userData.lineW = .01; world.add(lawn);
+  /* 篱笆：跟老园子前面那段一样的白尖桩，两道横杆 */
+  const pk = [], FP = roomFencePath().getSpacedPoints(90);
+  for (let i = 0; i < FP.length - 1; i++) {
+    const a = FP[i], b = FP[i + 1], mx = (a.x + b.x) / 2, mz = (a.y + b.y) / 2, len = Math.hypot(b.x - a.x, b.y - a.y), ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const g = new THREE.BoxGeometry(.055, .38, .045); g.translate(0, T0 + .19, 0); g.rotateY(-ang); g.translate(mx, 0, mz); pk.push(g);
+    for (const y of [.22, .37]) { const rl = new THREE.BoxGeometry(len + .02, .028, .028); rl.rotateY(-ang); rl.translate(mx, T0 - .09 + y, mz); pk.push(rl); }
+  }
+  const fence = new THREE.Mesh(mergeGeometries(pk), mat(C.white)); fence.userData.lineW = .006; world.add(fence);
+  /* 篱笆外沿稀稀落落几丛灌木，压住一半篱笆 */
+  for (let i = 3; i < FP.length - 3; i += 4) { if (Math.sin(i * .37) > .45) continue; const p = FP[i], q = FP[i + 1], tx = q.x - p.x, tz = q.y - p.y, tl = Math.hypot(tx, tz) || 1, nx = tz / tl, nz = -tx / tl, o = .08 + r() * .14; const sb = shrub(p.x + nx * o, p.y + nz * o, .26 + r() * .14, [G.leaf, G.leafD, G.leafL], r() < .35 ? [G.pink, C.white] : null); sb.position.y = Math.max(0, HAT(sb.position.x, sb.position.z)) + .02; world.add(sb); }
+  /* 拱门：跟大门一样的白柱子、半圈白拱，拱上爬玫瑰 */
+  for (const sd of [-1, 1]) world.add(at(new THREE.Mesh(new THREE.BoxGeometry(.1, .66, .1), mat(C.white)), ARCH.x + sd * ARCH.half, .42, ARCH.z));
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(ARCH.half, .035, 6, 18, Math.PI), mat(C.white)); arch.position.set(ARCH.x, .74, ARCH.z); world.add(arch);
+  for (let i = 0; i < 12; i++) { const a = i / 11 * Math.PI, rs = new THREE.Mesh(new THREE.IcosahedronGeometry(.05 + (i % 3) * .014, 0), mat(i % 3 ? G.pink : (i % 2 ? G.leaf : C.white))); rs.position.set(ARCH.x + Math.cos(a) * ARCH.half, .74 + Math.sin(a) * ARCH.half, ARCH.z + (r() - .5) * .07); rs.userData.lineW = .004; world.add(rs); }
+  /* 路：碎石带 + 两边矮砖沿 + 横铺的石板，全是直的，跟篱笆平行 */
+  const STONE = ['#9aa8b2', '#8e9ca6', '#a9b4bb', '#b3bcc0'], grav = mat('#e9e1d2'), brick = mat('#b49a80'), Y = T0 + .007;
+  const flat = (x0, x1, z0, z1, m, y) => { const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0); g.rotateX(-Math.PI / 2); const o = new THREE.Mesh(g, m); o.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); o.userData.noLine = true; o.receiveShadow = true; world.add(o); };
+  const bricks = (ax, az, bx, bz) => { const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.round(L / .12)), ry = Math.atan2(bx - ax, bz - az); for (let i = 0; i < n; i++) { const t = (i + .5) / n, b = new THREE.Mesh(new THREE.BoxGeometry(.05, .045, L / n - .008), brick); b.position.set(ax + (bx - ax) * t, T0 + .022, az + (bz - az) * t); b.rotation.y = ry; b.userData.lineW = .003; world.add(b); } };
+  const slab = (x, z, w, d) => { const st = new THREE.Mesh(new RoundedBoxGeometry(w, .04, d, 1, .012), mat(STONE[Math.floor(r() * 4)])); st.position.set(x + (r() - .5) * .02, T0 + .02, z + (r() - .5) * .02); st.rotation.y = (r() - .5) * .06; st.userData.lineW = .005; world.add(st); };
+  const W = .25, rimR = .9, PX = EXP.find((e) => e.id === 'basin').at[0];
+  /* 进门往南：拱门到拐角 */
+  flat(ARCH.x - W, ARCH.x + W, ARCH.z, AXIS_Z + W, grav, Y);
+  bricks(ARCH.x - W - .03, ARCH.z + .08, ARCH.x - W - .03, AXIS_Z + W + .03); bricks(ARCH.x + W + .03, ARCH.z + .08, ARCH.x + W + .03, AXIS_Z - W - .03);
+  for (let z = ARCH.z + .2; z < AXIS_Z - .1; z += .3) slab(ARCH.x, z, W * 1.6, .24);
+  /* 拐角往东：到池子那圈石子地，过了池子接着到坐的那块石子地 */
+  flat(ARCH.x - W, PX, AXIS_Z - W, AXIS_Z + W, grav, Y);
+  bricks(ARCH.x - W - .03, AXIS_Z + W + .03, PX - Math.sqrt(rimR * rimR - (W + .03) ** 2), AXIS_Z + W + .03);
+  bricks(ARCH.x + W + .03, AXIS_Z - W - .03, PX - Math.sqrt(rimR * rimR - (W + .03) ** 2), AXIS_Z - W - .03);
+  for (let x = ARCH.x + .05; x < PX - rimR - .12; x += .3) slab(x, AXIS_Z, .24, W * 1.6);
+  flat(PX, SQUARE.x0, AXIS_Z - W, AXIS_Z + W, grav, Y);
+  for (const sd of [-1, 1]) bricks(PX + Math.sqrt(rimR * rimR - (W + .03) ** 2), AXIS_Z + sd * (W + .03), SQUARE.x0 - .03, AXIS_Z + sd * (W + .03));
+  for (let x = PX + rimR + .15; x < SQUARE.x0 - .05; x += .3) slab(x, AXIS_Z, .24, W * 1.6);
+  /* 池子外面一圈石子地，砖沿收边 */
+  { const rg = new THREE.Mesh(new THREE.CircleGeometry(rimR, 40), grav); rg.rotation.x = -Math.PI / 2; rg.position.set(PX, Y + .001, AXIS_Z); rg.userData.noLine = true; rg.receiveShadow = true; world.add(rg);
+    const nb = 36; for (let i = 0; i < nb; i++) { const a = (i + .5) / nb * 6.28; if (Math.abs(Math.sin(a)) * rimR < W + .02) continue; const b = new THREE.Mesh(new THREE.BoxGeometry(.05, .045, rimR * 6.28 / nb * .9), brick); b.position.set(PX + Math.cos(a) * (rimR + .02), T0 + .022, AXIS_Z + Math.sin(a) * (rimR + .02)); b.rotation.y = -a; b.userData.lineW = .003; world.add(b); } }
+  /* 坐的那块石子地：花架和秋千墙围着，四边砖沿（西边留路口） */
+  { const Q = SQUARE; flat(Q.x0, Q.x1, Q.z0, Q.z1, grav, Y);
+    bricks(Q.x0 - .03, Q.z0 - .03, Q.x1 + .03, Q.z0 - .03); bricks(Q.x0 - .03, Q.z1 + .03, Q.x1 + .03, Q.z1 + .03); bricks(Q.x1 + .03, Q.z0, Q.x1 + .03, Q.z1);
+    bricks(Q.x0 - .03, Q.z0, Q.x0 - .03, AXIS_Z - W - .03); bricks(Q.x0 - .03, AXIS_Z + W + .03, Q.x0 - .03, Q.z1);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) slab(Q.x0 + .2 + i * .35, Q.z0 + .2 + j * .33, .3, .28);
+    /* 两只陶罐守着路口 */
+    const urnPts = [[0, 0], [.08, 0], [.12, .06], [.15, .16], [.13, .27], [.08, .32], [.1, .36], [0, .36]].map(([a, b]) => new THREE.Vector2(a * .7, b * .7));
+    for (const sd of [-1, 1]) { const u = new THREE.Mesh(new THREE.LatheGeometry(urnPts, 12), mat(EXP_C.terra)); u.position.set(Q.x0 + .12, T0, AXIS_Z + sd * (W + .2)); u.userData.lineW = .005; world.add(u); const top = new THREE.Mesh(new THREE.IcosahedronGeometry(.1, 1), mat(G.leafD)); top.position.set(Q.x0 + .12, T0 + .3, AXIS_Z + sd * (W + .2)); top.scale.y = .8; top.userData.lineW = .005; world.add(top); } }
+  /* 老园子里：老池子南沿到拱门三块踏步石 */
+  for (const [z, w] of [[2.55, .3], [2.85, .28], [3.15, .32]]) { const st = new THREE.Mesh(new RoundedBoxGeometry(w, .04, .2, 1, .012), mat(STONE[Math.floor(r() * 4)])); st.position.set(ARCH.x + (r() - .5) * .03, .105, z); st.rotation.y = (r() - .5) * .08; st.userData.lineW = .005; world.add(st); }
+  /* 进门两边一对修剪圆球 */
+  for (const sd of [-1, 1]) { const b = new THREE.Mesh(new THREE.IcosahedronGeometry(.13, 1), mat(G.leafD)); b.position.set(ARCH.x + sd * (W + .2), T0 + .12, ARCH.z + .3); b.userData.lineW = .006; world.add(b); }
+}
+function buildExpand(world) {
+  expSign(world);
+  if (ROOM_ON) { const s0 = seed; buildRoom(world); seed = s0; }
+  for (const e of EXP) { const st = expState(e.id); if (st && !(st === 'built' && (e.vase || e.row))) world.add(expPlace(e, st)); }
+}
+/* 开工以后当场把工地摆上（单独一组，自己 bake） */
+function addSiteLive(e) {
+  const g = expPlace(e, 'building'), root = new THREE.Group(); root.add(g); bake(root); outline(root); shadowAll(root); S.add(root);
+  applySky(); shadowsDirty(); wake();
+}
+
+/* —— 扩建单子 —— */
+function expSheetEl() {
+  if (expSheet) return expSheet;
+  const st = document.createElement('style');
+  st.textContent = `#expand{max-height:72vh;display:flex;flex-direction:column;padding-bottom:10px}
+#expand[hidden]{display:none}
+#expand h3{font-size:11px;font-weight:400;letter-spacing:.3em;color:var(--soft);margin:0 2px 2px}
+#expand .lv{display:flex;align-items:baseline;gap:8px;font-size:14px;margin:0 2px 8px;letter-spacing:.06em}
+#expand .lv small{font-size:11px;color:var(--soft);letter-spacing:.08em}
+#expand .lv b{margin-left:auto;font-weight:400;font-size:12px;color:var(--brick)}
+#expand .xl{overflow-y:auto;margin:0 -4px;padding:0 4px;scrollbar-width:none}
+#expand .xl::-webkit-scrollbar{display:none}
+#expand .xr{display:flex;align-items:center;gap:10px;padding:6px 10px;margin:0 0 5px;border-radius:14px;background:#fff;box-shadow:0 0 0 .5px rgba(90,60,50,.16)}
+#expand .xr:nth-child(odd){transform:rotate(-.3deg)}
+#expand .xr:nth-child(2n){transform:rotate(.3deg)}
+#expand .xr.lock{opacity:.6}
+#expand .xm{flex:1;min-width:0}
+#expand .xm b{font-weight:400;font-size:14px}
+#expand .xm p{font-size:11px;line-height:1.5;color:var(--soft);margin:1px 0 1px}
+#expand .xm small{font-size:11px;color:var(--ink);opacity:.75;letter-spacing:.04em}
+#expand .xs{flex:0 0 auto;text-align:right;font-size:12px;line-height:1.4}
+#expand .xs i{display:block;font-style:normal;font-size:10px;color:var(--soft)}
+#expand .xs .ok{color:#5f8a52}
+#expand .xs .busy{color:#c07a2c}
+#expand .xs .no{color:var(--soft)}
+#expand .xs button{padding:5px 12px;border-radius:14px;background:var(--brick);color:#fbf7ef;font-size:12px;letter-spacing:.1em}
+#expand .xs button.sure{background:#5b4a44}
+#expand .xs button:disabled{background:rgba(90,60,50,.14);color:var(--soft)}
+#expand .ft{font-size:10px;color:var(--soft);letter-spacing:.08em;margin:6px 2px 0;text-align:center}`;
+  document.head.appendChild(st);
+  expSheet = document.createElement('div'); expSheet.className = 'sheet'; expSheet.id = 'expand'; expSheet.hidden = true; document.body.appendChild(expSheet);
+  return expSheet;
+}
+function hideExpand() { if (expSheet) expSheet.hidden = true; }
+export function openExpand() {
+  const el = expSheetEl(); document.querySelectorAll('.sheet').forEach((s) => { if (s !== el) s.hidden = true; }); hideFarmCard();
+  renderExpand(); el.hidden = false; el.openedAt = performance.now(); wake();   /* 点木牌那一下手指抬起来还会补一个 click，落到刚弹出来的按钮上：开头 .4 秒不认 */
+}
+function renderExpand() {
+  const el = expSheetEl(), lv = gardenLevel(), left = 7 - DIARY_DAYS % 7, coins = Day.coins();
+  el.innerHTML = `<button class="x">×</button><h3>扩 建</h3><div class="lv">花园 ${lv} 级<small>· 再写 ${left} 天升级</small><b>花币 ${coins}</b></div><div class="xl"></div><p class="ft">付了当场开工，第二天早上六点建好 · 写满七天日记升一级</p>`;
+  el.querySelector('.x').onclick = hideExpand;
+  const box = el.querySelector('.xl');
+  for (const e of EXP) {
+    const st = expState(e.id), needOk = !e.need || expState(e.need) === 'built', row = document.createElement('div');
+    let right;
+    if (st === 'built') right = '<span class="ok">已建好</span>';
+    else if (st === 'building') right = '<span class="busy">施工中</span><i>明早六点好</i>';
+    else if (lv < e.lv || !needOk) right = `<span class="no">未解锁</span><i>${lv < e.lv ? e.lv + ' 级能建' : '先建好上一个'}</i>`;
+    else right = coins < e.p ? '<button disabled>可以建</button><i>花币还差 ' + (e.p - coins) + '</i>' : '<button>可以建</button>';
+    row.className = 'xr' + (!st && (lv < e.lv || !needOk) ? ' lock' : '');
+    row.innerHTML = `<div class="xm"><b>${e.zh}</b><p>${e.about}</p><small>${e.p} 花币 · ${e.lv} 级</small></div><div class="xs">${right}</div>`;
+    const b = row.querySelector('button:not(:disabled)');
+    if (b) b.onclick = () => { if (performance.now() - (el.openedAt || 0) < 400) return; if (!b.classList.contains('sure')) { box.querySelectorAll('button.sure').forEach((o) => { o.classList.remove('sure'); o.textContent = '可以建'; }); b.classList.add('sure'); b.textContent = `付 ${e.p} 开工`; return; } buyExpand(e); };   /* 点一下变「付多少开工」，再点才扣钱 */
+    box.appendChild(row);
+  }
+}
+function buyExpand(e) {
+  if (expState(e.id) || gardenLevel() < e.lv || (e.need && expState(e.need) !== 'built')) return;
+  const fp = expFoot(e); if (fp && BEDS.some((b) => !inPoly(b.x, b.z) && fp(b.x, b.z))) { toast('那块地上种着花，先拔掉再建'); return; }
+  if (expQ()) { toast('测试模式，不扣花币'); return; }
+  if (!Day.spend(e.p)) { toast('花币不够'); renderExpand(); return; }
+  const now = Date.now(); EXPS[e.id] = { state: 'building', startedAt: now, doneAt: Day.nextMorning(now) }; expSave();
+  addSiteLive(e); renderExpand(); toast(`${e.zh}开工了，明早六点建好`);
 }
 
 /* 花境：三大团，每团自己的几种颜色，高低三层（后面高的毛地黄/飞燕草、中间薰衣草绣球、前面贴地小花），堆满溢出；前面那片草坪留空 */
@@ -1090,11 +1638,43 @@ function fillBeds() {
   /* 草坪上零星草丛，不碰花境 */
   for (let i = 0; i < 360; i++) { const x = (rnd() - .5) * 8.6, z = (rnd() - .5) * 7.8; put(tuft, G.grassD, x, z, .09, .5 + rnd() * .7); }
   /* 同一种形不分颜色并成一个 InstancedMesh，颜色走每个实例自己的 instanceColor（白材质 × 实例色 = 原来的颜色），draw call 少一百多个 */
+  /* 扩建占的地（木牌、建好的和在施工的）：园子外面那些野花草丛让开，不动随机数，盖完再筛 */
+  const blk = expBlockers();
+  for (const it of lists.values()) it.m = it.m.filter((mm) => { const x = mm.elements[12], z = mm.elements[14]; return inPoly(x, z) || !blk.some((f) => f(x, z)); });
+  /* 新园子的花境：南篱笆一长条、西篱笆一短条，高的靠篱笆、矮的朝路；一段一个饱和色，白色只当隔断 */
+  if (ROOM_ON) {
+    const s0 = seed; seed = 53;
+    const putF = (fname, c, x, z, y, sc) => { const f = F[fname], ry = rnd() * 6.28, tl = (rnd() - .5) * .18; for (const [geo, role] of f.parts) { d.position.set(x, y, z); d.rotation.set(tl, ry, 0); d.scale.setScalar(sc * f.w); d.updateMatrix(); const col = partColor(role, c), key = geo.uuid + col; if (!lists.has(key)) lists.set(key, { geo, color: col, m: [] }); lists.get(key).m.push(d.matrix.clone()); } };
+    const putB = (geo, color, x, z, y, sc) => { d.position.set(x, y, z); d.rotation.set(0, rnd() * 3, 0); d.scale.setScalar(sc); d.updateMatrix(); const key = geo.uuid + color; if (!lists.has(key)) lists.set(key, { geo, color, m: [] }); lists.get(key).m.push(d.matrix.clone()); };
+    const COLS = ['#ff4f8b', '#ffc21a', '#8a4fd8', '#fbf6ec', '#ee3340', '#ff7aa8', '#fbf6ec', '#6f93e8'];
+    const BEDS_R = [
+      { a: [ROOM.x0 + .35, ROOM.z1 - .32], b: [ROOM.x1 - .35, ROOM.z1 - .32], back: [0, 1], w: .26 },
+      { a: [ROOM.x0 + .26, 3.75], b: [ROOM.x0 + .26, ROOM.z1 - .6], back: [-1, 0], w: .16 },
+    ];
+    const Y = ROOM.top + .01;
+    let ci = 0;
+    for (const B of BEDS_R) {
+      const L = Math.hypot(B.b[0] - B.a[0], B.b[1] - B.a[1]), n = Math.round(L / .1);
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, px = B.a[0] + (B.b[0] - B.a[0]) * t, pz = B.a[1] + (B.b[1] - B.a[1]) * t;
+        if (i % 7 === 0) ci++;
+        const block = COLS[ci % COLS.length], nextC = COLS[(ci + 1) % COLS.length];
+        for (let j = 0; j < 9; j++) {
+          const u = rnd() * 2 - 1, x = px + B.back[0] * u * B.w + (rnd() - .5) * .05 * (1 - Math.abs(B.back[0])), z = pz + B.back[1] * u * B.w + (rnd() - .5) * .05 * (1 - Math.abs(B.back[1]));
+          const layer = u > .3 ? 'back' : u < -.35 ? 'front' : 'mid'; let f = pickForm(LAYER[layer], rnd()); if (f === 'cypress' || f === 'silver' || f === 'lemon') f = 'mound';
+          if (layer !== 'front' && j % 3 === 0) putB(bush, rnd() < .5 ? G.leaf : G.leafD, x, z, Y + .02, .6 + rnd() * .4);
+          const cf = COLOR_FOR[f]; putF(f, cf ? cf[Math.floor(rnd() * cf.length)] : (rnd() < .9 ? block : nextC), x, z, Y, layer === 'back' ? 1 + rnd() * .3 : .85 + rnd() * .35);
+        }
+      }
+    }
+    seed = s0;
+  }
   const byGeo = new Map();
   for (const { geo, color, m } of lists.values()) { if (!byGeo.has(geo)) byGeo.set(geo, []); byGeo.get(geo).push({ color, m }); }
   const ic = new THREE.Color();
   for (const [geo, arr] of byGeo) {
-    const n = arr.reduce((k, a) => k + a.m.length, 0), im = new THREE.InstancedMesh(geo, geo === tuft ? mat('#ffffff', { side: THREE.DoubleSide }) : mat('#ffffff'), n);
+    const n = arr.reduce((k, a) => k + a.m.length, 0); if (!n) continue;
+    const im = new THREE.InstancedMesh(geo, geo === tuft ? mat('#ffffff', { side: THREE.DoubleSide }) : mat('#ffffff'), n);
     let i = 0; for (const { color, m } of arr) { ic.set(color); for (const mm of m) { im.setMatrixAt(i, mm); im.setColorAt(i, ic); i++; } }
     im.castShadow = geo !== tuft; im.receiveShadow = true; S.add(im);
   }
@@ -1158,7 +1738,7 @@ function makeFlower(f) {
 /* 拖花：落不下的地方就停在上一个能落的位置 */
 export function load(list) {
   if (!flowerRoot) return;
-  WX = weatherOf(list); applySky();
+  WX = weatherOf(list); applySky(); countDiaryDays(list);
   dropGeos(flowerRoot); flowerRoot.clear(); flowers = []; shadowsDirty(); wake(600);
   sproutsInto(list);
   list.forEach((f, i) => {
@@ -1210,7 +1790,9 @@ function bindPointer(el) {
     const hv = ray.intersectObjects(VASE_HITS)[0];   /* 长按园子里的一盆插花收回去，腾出花位 */
     if (hv) { const v = hv.object.userData.vase; press = setTimeout(() => { press = null; down = null; takeVase(v); }, 650); return; }
     const hc = ray.intersectObjects(CLUMP_HITS)[0];
-    if (hc) { const b = hc.object.userData.bed; press = setTimeout(() => { press = null; down = null; removeBed(b); }, 650); }
+    if (hc) { const b = hc.object.userData.bed; press = setTimeout(() => { press = null; down = null; removeBed(b); }, 650); return; }
+    const hp = nearField() && ray.intersectObjects(PLOT_HITS)[0];   /* 田边长按一块地：问拔不拔 */
+    if (hp && FIELD[hp.object.userData.plot]) { const k = hp.object.userData.plot; press = setTimeout(() => { press = null; down = null; pullCard(k); }, 650); }
   });
   el.addEventListener('pointermove', (e) => { if (press && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) cancelPress(); });
   el.addEventListener('pointermove', (e) => {
@@ -1232,6 +1814,10 @@ function bindPointer(el) {
       if (tapped) { down = null; dispatchEvent(new CustomEvent('flower-pick', { detail: tapped.userData.f })); return; }
       dispatchEvent(new CustomEvent('flower-none'));
       pick(e);
+      const hp = nearField() && ray.intersectObjects(PLOT_HITS)[0];
+      if (hp) { down = null; tapPlot(hp.object.userData.plot); return; }
+      if (ray.intersectObjects(EXP_HITS)[0]) { down = null; openExpand(); return; }   /* 大门边那块「扩建」木牌 */
+      hideFarmCard(); hideExpand();
       if (plantMode) { if (ray.ray.intersectPlane(groundPlane, p)) plantAt(p.x, p.z); down = null; return; }
       const hz = ray.intersectObjects(ZONES)[0];
       if (hz) goZone(hz.object.userData.zone); else if (away) goHome();

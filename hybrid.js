@@ -10,8 +10,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 /* —— 基因：全是整数档，手机上同一档共用一个模型 ——
    n 外圈瓣数 4–8；dbl 重瓣 0/1；shape 瓣形 0 窄披针…4 圆阔；notch 梢缺口 0–3；cup 兜深 0–3；ruffle 褶密 0–3；
-   form 骨架 0–7（见下面 FORMS）；hue 0–35（十度一档）；sat 0–4；lit 0–4；size 0–4 花头大小；height 0–4 枝高 */
-export const RANGE = { n: [4, 8], dbl: [0, 1], shape: [0, 4], notch: [0, 3], cup: [0, 3], ruffle: [0, 3], form: [0, 7], hue: [0, 35], sat: [0, 4], lit: [0, 4], size: [0, 4], height: [0, 4] };
+   form 骨架 0–8（见下面 FORMS）；hue 0–35（十度一档）；sat 0–4；lit 0–4；size 0–4 花头大小；height 0–4 枝高 */
+export const RANGE = { n: [4, 8], dbl: [0, 1], shape: [0, 4], notch: [0, 3], cup: [0, 3], ruffle: [0, 3], form: [0, 8], hue: [0, 35], sat: [0, 4], lit: [0, 4], size: [0, 4], height: [0, 4] };
 /* 骨架：ikebana.js 按 form 挑画法，其余基因在每种骨架上各有各的用处。
    suf 是突变出新骨架时名字后头带的字（铃怦 + 碎雾 → 铃怦雾），老骨架 0/1 不带。 */
 export const FORMS = [
@@ -23,9 +23,10 @@ export const FORMS = [
   { id: 5, zh: '碎雾', suf: '雾' },         /* 满天星：分叉细枝顶一堆极小的点花 */
   { id: 6, zh: '头状', suf: '菊' },         /* 雏菊非洲菊：凸起的花心盘 + 一圈舌状瓣 */
   { id: 7, zh: '风花', suf: '晃' },         /* 秋牡丹：细长茎微低头，几片宽圆瓣，青芯金蕊，风一吹晃 */
+  { id: 8, zh: '百合', suf: '合' },         /* 百合：六片窄长尖瓣喇叭/星形张开，尖端外翻，长花丝明显的药，侧枝一个苞 */
 ];
-export const formOf = (g) => FORMS[clamp(Math.round((g && g.form) || 0), 0, 7)];
-const fixForm = (g) => { if (g.form === 1 || g.form === 3 || g.form === 5 || g.form === 7) g.dbl = 0; if (g.form === 4) g.dbl = 1; return g; };
+export const formOf = (g) => FORMS[clamp(Math.round((g && g.form) || 0), 0, 8)];
+const fixForm = (g) => { if (g.form === 1 || g.form === 3 || g.form === 5 || g.form === 7 || g.form === 8) g.dbl = 0; if (g.form === 4) g.dbl = 1; return g; };
 const KEYS = Object.keys(RANGE);
 const SAT = [.36, .5, .62, .74, .86], LIT = [.5, .58, .66, .74, .82];
 
@@ -84,6 +85,14 @@ Object.assign(SPECIES, {
 Object.assign(SPECIES, {
   anemone: { ...base('anemone', '秋晃晃', '#f8f4ec', { n: 6, shape: 4, notch: 0, cup: 1, ruffle: 0, form: 7, size: 2, height: 4 }), rare: true, season: [9, 10, 11] },   /* rare 让园子按 colorsOf 上色（白），不走心情色 */
 });
+Object.assign(SPECIES, {
+  weiwei: { ...base('weiwei', String.fromCharCode(21807, 21807, 33457), '#f6a3c0', { n: 6, dbl: 1, shape: 3, notch: 1, cup: 2, ruffle: 2, form: 4, size: 3, height: 3 }), rare: true, gift: true, grad: ['#ea6b97', '#fde3ec'] },
+  lanlan: { ...base('lanlan', String.fromCharCode(23706, 23706, 33457), '#8cc4ec', { n: 6, shape: 0, notch: 0, cup: 1, ruffle: 0, form: 8, size: 2, height: 4 }), rare: true, gift: true, grad: ['#6fb6e8', '#eef7fc'] },
+});
+export const gifts = () => Object.values(SPECIES).filter((s) => s.gift);
+/* 能不能当爸妈：送人的花不参与杂交 */
+export const canBreed = (id) => { const s = speciesById(id); return !!s && !s.gift; };
+export const gradOf = (f) => { const s = f && f.species && SPECIES[f.species]; return s && s.grad ? s.grad : null; };
 const monthOf = (now) => (now instanceof Date ? now : new Date(now || Date.now())).getMonth() + 1;
 export const inSeason = (id, now) => { const s = SPECIES[id]; return !!s && (!s.season || s.season.includes(monthOf(now))); };
 /* 这会儿当季的季节花（种子铺读这个上架）；now 可传日期或毫秒 */
@@ -160,9 +169,9 @@ export function cross(a, b, R = Math.random) {
 }
 
 /* —— 起名：爸妈名字各取一个字（晴铃花 × 怦心兰 → 铃怦）：前者取末字、后者取首字。
-   只去掉结尾那一个后缀字（花兰莲铃球菊草盏团雾晃），中间的不动：晴铃花→晴铃、垂雨铃→垂雨、毛线球→毛线；两字相同的组合不要。
+   只去掉结尾那一个后缀字（花兰莲铃球菊草盏团雾晃合），中间的不动：晴铃花→晴铃、垂雨铃→垂雨、毛线球→毛线；两字相同的组合不要。
    突变出爸妈都没有的骨架时，后头带上那骨架的字（铃怦 + 碎雾 → 铃怦雾），一眼看出它换了样子 —— */
-const stem = (n) => { const a = [...(n || '花')]; return a.length > 1 && /[花兰莲铃球菊草盏团雾晃]/.test(a[a.length - 1]) ? a.slice(0, -1) : a; };
+const stem = (n) => { const a = [...(n || '花')]; return a.length > 1 && /[花兰莲铃球菊草盏团雾晃合]/.test(a[a.length - 1]) ? a.slice(0, -1) : a; };
 export function autoName(na, nb, taken = [], suf = '') {
   const A = stem(na), B = stem(nb);
   const tries = [A[A.length - 1] + B[0], A[0] + B[B.length - 1], B[B.length - 1] + A[0], B[0] + A[A.length - 1]].map((t) => suf && !t.includes(suf) ? t + suf : t);
@@ -188,7 +197,7 @@ export function breedOvernight(placed, now = Date.now(), R = Math.random) {
     const a = placed[i], b = placed[j];
     if (!adjacent(a, b) || !(a.placedAt < today && b.placedAt < today)) continue;
     const key = [a.id, b.id].sort().join('|'); if (pairs[key]) continue;
-    const sa = vaseSpecies(a), sb = vaseSpecies(b);
+    const sa = vaseSpecies(a).filter(canBreed), sb = vaseSpecies(b).filter(canBreed); 
     let pa = null, pb = null;
     for (const x of sa) { for (const y of sb) if (x !== y) { pa = x; pb = y; break; } if (pa) break; }
     if (!pa) continue;                                      /* 两盆是同一种花，结不出新的 */

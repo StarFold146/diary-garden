@@ -8,6 +8,7 @@ import { C, archWindow, DECOR } from './shop/house.js';
 import * as K from './town/food.js';
 import { SPECIES, dishOf, useSpecies } from './town/mem.js';
 import * as Day from './day.js';   /* 一天开一次店、结一次账、补一次货；种子铺 */
+import './bag.js';   /* 背包 */
 useSpecies(Day.seasonSpecs());   /* 应季菜（南瓜、栗子、柿子）登记进小镇的菜谱，后厨端出来的应季菜柜子里才摆得出来 */
 
 const $ = (s) => document.querySelector(s);
@@ -477,6 +478,8 @@ function renderDecor() {
   }));
 }
 $('#decorBtn').onclick = () => { closeAll(); renderDecor(); $('#decor').hidden = false; };
+/* 怎么玩：一张短纸条，再点一下问号就收起来 */
+$('#helpBtn').onclick = () => { const h = $('#help').hidden; closeAll(); $('#help').hidden = !h; };
 
 /* 结过账、补过货就等明天：按钮变灰，顶上换一句（日子按手机本地时间换） */
 function dayBar() {
@@ -486,22 +489,22 @@ function dayBar() {
   $('#hint').textContent = shut ? '今天打过烊了，门口挂上了牌子，明天再开门' : empty ? '柜子还空着。柜台旁边的小门是后厨，做几盘菜再来补货' : '拖动转着看 · 点柜子里的吃的、软木板上的明信片、门边的信箱、柜台旁的后厨门';
 }
 
-// ---------- 种子铺：花种子拿去园子里种，菜种子种出来进厨房 ----------
+// ---------- 种子铺：花种子拿去园子里种，菜种子进口袋、去田里种，熟了收进厨房 ----------
 function seedRow(id, it, owned, unit, buy) {
-  const li = document.createElement('li'), c = Day.coins(), b = document.createElement('button');
-  li.innerHTML = `<span>${it.c ? `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;background:${it.c};box-shadow:0 0 0 .5px rgba(90,60,50,.3)"></i>` : ''}${it.season ? `<em class="stag ${it.season}">${Day.SEASON_ZH[it.season]}</em>` : ''}${it.zh}${it.hybrid ? '<small> 园子里配的</small>' : ''}<small>${owned ? ' 有 ' + owned + unit : ''}</small></span>`;
+  const li = document.createElement('li'), c = Day.coins(), b = document.createElement('button'), grow = buy === Day.buyCropSeed ? ` · ${Day.GROW_H[id] || 4} 小时熟` : '';
+  li.innerHTML = `<span>${it.c ? `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;background:${it.c};box-shadow:0 0 0 .5px rgba(90,60,50,.3)"></i>` : ''}${it.season ? `<em class="stag ${it.season}">${Day.SEASON_ZH[it.season]}</em>` : ''}${it.zh}${it.hybrid ? '<small> 园子里配的</small>' : ''}<small>${grow}${owned ? (grow ? ' · 有 ' : ' 有 ') + owned + unit : ''}</small></span>`;
   b.className = 'buy'; b.disabled = c < it.p; b.textContent = it.p + ' 花币';
   b.onclick = () => { if (buy(id)) { setCoins(Day.coins()); renderSeeds(); } };
   li.appendChild(b); return li;
 }
 function renderSeeds() {
-  const fl = $('#sFlower'), cr = $('#sCrop'), s = Day.seeds(), p = Day.pantry();
+  const fl = $('#sFlower'), cr = $('#sCrop'), s = Day.seeds(), p = Day.cropSeeds();   /* 菜种子进口袋（粒），去田里种 */
   /* 应季：当季的花和菜排最顶上，过季这一栏整个藏起来 */
   const sf = Object.entries(Day.seasonFlowerSeeds()), sc = Object.entries(Day.seasonCropSeeds());
-  $('#sSeason').replaceChildren(...sf.map(([id, it]) => seedRow(id, it, s[id], ' 粒', Day.buyFlowerSeed)), ...sc.map(([id, it]) => seedRow(id, it, p[id], ' 份', Day.buyCropSeed)));
+  $('#sSeason').replaceChildren(...sf.map(([id, it]) => seedRow(id, it, s[id], ' 粒', Day.buyFlowerSeed)), ...sc.map(([id, it]) => seedRow(id, it, p[id], ' 粒', Day.buyCropSeed)));
   $('#sSeason').hidden = $('#sSeasonH').hidden = !(sf.length + sc.length);
   fl.replaceChildren(...Object.entries(Day.flowerSeeds()).map(([id, it]) => seedRow(id, it, s[id], ' 粒', Day.buyFlowerSeed)));
-  cr.replaceChildren(...Object.entries(Day.CROP_SEEDS).map(([id, it]) => seedRow(id, it, p[id], ' 份', Day.buyCropSeed)));
+  cr.replaceChildren(...Object.entries(Day.CROP_SEEDS).map(([id, it]) => seedRow(id, it, p[id], ' 粒', Day.buyCropSeed)));
   $('#sCoins').textContent = Day.coins() + ' 花币';
 }
 $('#seedsBtn').onclick = () => { closeAll(); renderSeeds(); $('#seeds').hidden = false; };

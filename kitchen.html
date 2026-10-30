@@ -35,10 +35,33 @@
 .rc-row em{font-style:normal;min-width:18px;text-align:center}
 .rc-row .mk{width:auto;padding:0 14px;margin-left:auto;background:var(--ink);color:var(--paper);font-size:12px;letter-spacing:.2em}
 .rc-empty{font-size:12px;color:var(--soft);padding:10px 0}
+/* 怎么玩：菜谱按钮底下一个小问号，点开一张短纸条 */
+.hpbtn{position:fixed;left:14px;top:calc(env(safe-area-inset-top) + 52px);z-index:30;width:30px;height:30px;border-radius:15px;background:var(--card);font-size:13px;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12)}
+.rcsheet.help{bottom:auto;max-height:calc(100% - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 72px)}
+.help p{font-size:13px;line-height:1.75;padding:7px 0;border-bottom:.5px dashed rgba(90,60,50,.2)}
+.help p:last-child{border-bottom:0}
+.hl{color:inherit;background:linear-gradient(176deg,transparent 52%,rgba(243,227,166,.62) 52%,rgba(240,222,160,.55) 90%,transparent 91%);padding:0 .18em;margin:0 -.04em;border-radius:.3em .5em .25em .45em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.help p:nth-of-type(3n+2) .hl{background:linear-gradient(177deg,transparent 54%,rgba(196,214,186,.6) 54%,rgba(190,209,180,.52) 91%,transparent 92%)}
+.help p:nth-of-type(3n) .hl{background:linear-gradient(175deg,transparent 53%,rgba(238,200,196,.55) 53%,rgba(234,194,190,.48) 90%,transparent 91%)}
+/* 顶栏：右上一排 背包 · ？ · 回店里，跟店里、插花台同一个角、同一种药丸 */
+.kbar{position:fixed;right:16px;top:calc(env(safe-area-inset-top) + 12px);z-index:30;display:flex;align-items:center;gap:6px}
+.kbar .back,.kbar .hpbtn{position:static}
+.kbar .back{padding:6px 12px}
+.kbar .hpbtn{width:32px;height:32px;border-radius:16px;font-size:12px}
+.rcbtn{left:16px;top:calc(env(safe-area-inset-top) + 12px);padding:6px 14px}
 </style></head><body>
-<a class="back" href="shop.html">回店里</a>
 <button class="rcbtn" id="rcBtn">菜 谱</button>
 <div class="rcsheet" id="rcSheet" hidden><button class="x" id="rcClose">×</button><h3>菜 谱</h3><p class="sub2">端上桌过的菜都在这儿 · 按菜篮子够做几份</p><div id="rcList"></div></div>
+<div class="kbar"><button id="bagBtn" aria-label="背包"></button><button class="hpbtn" id="hpBtn" aria-label="怎么玩">？</button><a class="back" href="shop.html">回店里</a></div>
+<div class="rcsheet help" id="hpSheet" hidden><button class="x" id="hpClose">×</button><h3>厨 房 怎 么 玩</h3><p class="sub2">几句话，看完就会</p>
+<p>菜篮子里的菜有两个来处。<mark class="hl">今天第一篇日记写了什么心情</mark>，那样菜就<mark class="hl">给两份</mark>，别的去田里种。</p>
+<p>端上桌的时候，盘里用到的<mark class="hl">每样菜扣一份</mark>。摆了三块心跳莓，也只扣一份心跳莓。</p>
+<p>头一回端上桌的菜会<mark class="hl">记进菜谱</mark>。下次在菜谱里点<mark class="hl">「出盘」</mark>，直接做好，不用再摆一遍。</p>
+<p>一盘里每样菜各用一份，所以能做几盘<mark class="hl">看最少的那样</mark>。五个南瓜两个栗子，只能做两盘。</p>
+<p><mark class="hl">一盘起价 32</mark>，多加一样菜<mark class="hl">多卖 12</mark>。一样菜卖 44，三样卖 68，再往上就不涨了。做成蛋糕<mark class="hl">再多卖 14</mark>。</p>
+<p>有几样菜凑在一起会变成<mark class="hl">隐藏菜，多卖 20</mark>。比如心跳莓配双生桃，做法选原样，就是双心莓桃派。</p>
+<p>做好的菜<mark class="hl">先放在后厨</mark>，回店里<mark class="hl">补货摆进柜子</mark>，才有人买。</p>
+</div>
 <section class="scr on" id="s2"> <p class="ld" id="ld">生 火 中</p> <div class="bar"><i id="barI"></i></div> <p class="tip" id="tip">把心情洗一洗，切一切</p> <p class="credit">这间厨房拆自记忆小镇 <b>暮园 · Hesperides</b></p> </section>
 <section class="scr" id="s3"> <canvas id="cv"></canvas> <div class="dish" id="dish"></div> <div class="panel"> <h3>点一下拿一块 · 拖着摆 · 轻点转一转 · 拖出盘外扔掉</h3><div class="chips" id="pieces"></div> <h3 style="margin-top:8px">做法</h3><div class="chips" id="forms"></div> <div class="prow"><button id="clear">清空</button><button id="serve" class="main">端上桌</button></div> </div> </section>
 <section class="scr" id="s4"> <div class="card" id="card"></div> <button class="again" id="again">再 来 一 盘</button> </section>

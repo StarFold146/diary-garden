@@ -73,6 +73,7 @@ h2{font-size:16px;font-weight:400;letter-spacing:.12em;margin-bottom:6px;text-al
 .sheet .x{position:absolute;right:12px;top:8px;font-size:18px;color:var(--soft)}
 .sheet .go{margin-top:4px;padding:7px 22px;font-size:13px}
 #menu .go{display:block;width:100%;margin-top:8px;text-align:center}
+#menu .msh{font-size:11px;color:var(--soft);letter-spacing:.2em;margin:12px 0 -2px}
 #menu .go.ghost{background:none;color:var(--ink);box-shadow:inset 0 0 0 .5px rgba(90,60,50,.4)}
 #pc{display:block;width:100%;max-height:62vh;object-fit:contain;border-radius:3px;box-shadow:0 10px 28px -10px rgba(40,30,20,.35)}
 .sheet .go.ghost{background:none;color:var(--ink);box-shadow:inset 0 0 0 .5px rgba(90,60,50,.4)}
@@ -116,7 +117,7 @@ h2{font-size:16px;font-weight:400;letter-spacing:.12em;margin-bottom:6px;text-al
   <p class="credit">这座花园拆自记忆小镇 <b>暮园 · Hesperides</b></p>
 </section>
 
-<div id="hud"><h1>我的花园</h1><button id="vaseBtn">插花</button><button id="shopBtn">店里</button><button id="addBtn">写一句</button><button id="menuBtn">···</button></div>
+<div id="hud"><h1>我的花园</h1><button id="vaseBtn">插花</button><button id="shopBtn">店里</button><button id="addBtn">写一句</button><button id="bagBtn" aria-label="背包"></button><button id="menuBtn">···</button></div>
 <div id="hint" hidden>拖动挪着看 · 双指转 · 按住一朵花拖着挪 · 点一下看那天</div>
 
 <div class="sheet" id="card" hidden><button class="x" data-close>×</button>
@@ -129,10 +130,13 @@ h2{font-size:16px;font-weight:400;letter-spacing:.12em;margin-bottom:6px;text-al
 </div>
 <div class="sheet" id="menu" hidden><button class="x" data-close>×</button>
   <div style="font-size:14px;letter-spacing:.2em;margin-bottom:4px">花 园</div>
-  <button class="go" id="mExport">把花园打包带走</button>
+  <button class="go" id="mExpand">扩 建</button>
+  <button class="go ghost" id="mBook">图 鉴</button>
+  <button class="go ghost" id="mNotes">更 新 说 明</button>
+  <div class="msh">存 档</div>
+  <button class="go ghost" id="mExport">把花园打包带走</button>
   <label class="go ghost">从文件搬回来<input id="mImport" type="file" accept=".json,application/json" hidden></label>
   <button class="go ghost" id="mDemo">放二十天的样子看看</button>
-  <button class="go ghost" id="mBook">图 鉴</button>
   <button class="go ghost" id="mClear">清空重来</button>
 </div>
 <div class="sheet" id="book" hidden><button class="x" data-close>×</button>

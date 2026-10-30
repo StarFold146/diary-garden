@@ -3,6 +3,7 @@
 // 只换了食材从哪来：今天日记里写的心情，按暮园那张心情→作物的表换食材；不够三样从花园田里的作物补，最多六样。
 // 做好的菜存 localStorage diarytown_dishes，给店里展示柜读。
 import * as Day from './day.js';   /* 菜篮子：日记一天给一次心情的菜，别的去店里买种子 */
+import './bag.js';   /* 背包 */
 const $ = (id) => document.getElementById(id);
 
 /* 心情→食材，照暮园那张；id 跟日记花园 main.js 的 MOODS 一一对上。烦那句原来说螺丝豆，作物已经换成向光葵，跟着改 */
@@ -80,7 +81,7 @@ async function fire() {
     const m = await loadMods();
     if (!species.length) await gather();
     await barDone; clearInterval(tipT);
-    if (!species.length) { $('ld').textContent = '菜 篮 子 空 了'; $('tip').innerHTML = '今天的心情菜用完了。写一篇日记，或者<a href="shop.html?seeds" style="color:var(--brick)">去店里买点种子</a>'; return; }
+    if (!species.length) { $('ld').textContent = '菜 篮 子 空 了'; $('tip').innerHTML = '今天的心情菜用完了。写一篇日记，<a href="./?home&farm" style="color:var(--brick)">去田里收一收</a>，或者<a href="shop.html?seeds" style="color:var(--brick)">去店里买种子</a>回来种'; return; }
     kitchen(m, species); go(3);
   } catch (e) {
     clearInterval(tipT); console.error(e); toast('锅没点着，再试一次'); mods = null;
@@ -272,7 +273,10 @@ function makePlates(r, n) {
   } catch (e) {}
   toast('出了 ' + n + ' 盘，放在后厨，去店里补货'); renderRecipes();
 }
-$('rcBtn').onclick = () => { renderRecipes(); $('rcSheet').hidden = false; };
+$('rcBtn').onclick = () => { $('hpSheet').hidden = true; renderRecipes(); $('rcSheet').hidden = false; };
+/* 怎么玩：一张短纸条，跟菜谱同时只开一张 */
+$('hpBtn').onclick = () => { $('rcSheet').hidden = true; $('hpSheet').hidden = !$('hpSheet').hidden; };
+$('hpClose').onclick = () => { $('hpSheet').hidden = true; };
 $('rcClose').onclick = () => { $('rcSheet').hidden = true; };
 /* 再来一盘：暮园是回去重挑心情；这里心情是日记定的，就重新生火、同一把食材再摆一盘 */
 $('again').onclick = () => { species = []; fire(); };   /* 重新看菜篮子，用完的那样就没了 */

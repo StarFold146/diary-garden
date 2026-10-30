@@ -1,7 +1,7 @@
 // 日记花园的一天和钱包：店一天只开一次、结一次账、补一次货；日记一天只给一次花和菜；
 // 别的都拿花币买。所有「今天做过没有」都在这儿判，按手机本地时间零点换天。
 // 存 localStorage：diarytown_daily（每件事最后做的那天）、diarytown_coins、diarytown_seeds（花种子，粒）、
-// diarytown_pantry（厨房的菜，份）、diarytown_vase_slots、diarytown_vases_placed
+// diarytown_pantry（厨房的菜，份）、diarytown_cropseeds（菜种子，粒）、diarytown_field（田里 18 块地）、diarytown_vase_slots、diarytown_vases_placed
 import * as Hy from './hybrid.js';   /* 杂交出来的新花也上种子铺 */
 const get = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
 const put = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -23,7 +23,7 @@ export function spend(n) { const c = coins(); if (c < n) return false; setCoins(
 export const START_COINS = 500;
 if (!get('diarytown_econ_v2', false)) { if (coins() < START_COINS) setCoins(START_COINS); put('diarytown_econ_v2', 1); }
 
-/* —— 种子铺的价钱：花种子一包 3 粒，种一丛稀 1 粒、中 2 粒、密 3 粒；菜种子一包够做 2 盘 ——
+/* —— 种子铺的价钱：花种子一包 3 粒，种一丛稀 1 粒、中 2 粒、密 3 粒；菜种子一包 2 粒，田里一粒收 1–3 份 ——
    200 起步一包都买不起。现在卖一盘菜（四五十到七八十）差不多换一包种子，一天做两三盘、打烊能买一到三包 */
 export const PACK = 3, CROP_PACK = 2;
 export const FLOWER_SEEDS = {
@@ -96,12 +96,28 @@ export const seedCount = (sp) => +seeds()[sp] || 0;
 export function useSeeds(sp, n) { const s = seeds(); if ((+s[sp] || 0) < n) return false; s[sp] -= n; put('diarytown_seeds', s); return true; }
 export function buyFlowerSeed(sp) { const it = flowerSeeds()[sp] || seasonFlowerSeeds()[sp]; if (!it || !spend(it.p)) return false; const s = seeds(); s[sp] = (+s[sp] || 0) + PACK; put('diarytown_seeds', s); return true; }
 
-/* —— 厨房的菜（份）：日记心情给的和买种子种出来的放一起 —— */
+/* —— 厨房的菜（份）：日记心情给的和田里收的放一起 —— */
 export const CROP_OF = { happy: 'heartberry', sweet: 'twinpeach', calm: 'tiderice', coax: 'bloom', down: 'lanternplant', messy: 'thoughtleaf', cross: 'boltbean' };
 export const pantry = () => get('diarytown_pantry', {});
 export function addPantry(k, n) { const p = pantry(); p[k] = (+p[k] || 0) + n; put('diarytown_pantry', p); }
 export function usePantry(ks) { const p = pantry(); for (const k of ks) if (p[k] > 0) p[k]--; put('diarytown_pantry', p); }
-export function buyCropSeed(k) { const it = CROP_SEEDS[k] || seasonCropSeeds()[k]; if (!it || !spend(it.p)) return false; addPantry(k, CROP_PACK); return true; }
+/* —— 菜种子：买来的菜种子进口袋 diarytown_cropseeds（粒），
+   去田里点空地种一粒，按真时间长几个钟头，熟了点一下收进菜篮子，一粒收 1–3 份。
+   日记心情给的菜还是现成的，直接进菜篮子（一天一次照旧），田里只种买来的种子 —— */
+export const cropSeeds = () => get('diarytown_cropseeds', {});
+export const cropSeedCount = (k) => +cropSeeds()[k] || 0;
+export function useCropSeed(k) { const s = cropSeeds(); if (!(s[k] > 0)) return false; s[k]--; put('diarytown_cropseeds', s); return true; }
+export function buyCropSeed(k) { const it = CROP_SEEDS[k] || seasonCropSeeds()[k]; if (!it || !spend(it.p)) return false; const s = cropSeeds(); s[k] = (+s[k] || 0) + CROP_PACK; put('diarytown_cropseeds', s); return true; }
+/* 长多久（钟头）：便宜的快，贵的慢，应季的再慢一点 */
+export const GROW_H = { thoughtleaf: 2, tiderice: 3, boltbean: 3, heartberry: 4, lanternplant: 5, twinpeach: 6, palettemelon: 6, velvetgrape: 5, bloom: 8, chestnut: 9, pumpkin: 10, persimmon: 10 };
+export const growMs = (k) => (GROW_H[k] || 4) * 3600e3;
+/* 田：18 块地，diarytown_field 存 [{ kind, plantedAt, growMs } | null]；没有这个键时返回 null，让 garden.js 按老田里画着的作物搬过来。
+   扩建能给田加一排两排（一排 6 块，最多 30 块）：garden.js 按建好了几排传 n，新加的地接在 18 块后面 */
+export const FIELD_N = 18;
+export function field(n = FIELD_N) { const f = get('diarytown_field', null); if (!Array.isArray(f)) return null; const out = []; for (let i = 0; i < n; i++) out.push(f[i] && f[i].kind ? f[i] : null); return out; }
+export const saveField = (f) => put('diarytown_field', f);
+/* 这一块熟没熟：0 刚种 → 1 熟了 */
+export const plotProgress = (p, now = Date.now()) => !p ? 0 : !p.growMs ? 1 : Math.max(0, Math.min(1, (now - p.plantedAt) / p.growMs));
 /* 今天第一篇日记：每个心情的菜各给 2 份。一天只给一次，返回给了没有 */
 export function claimDiary(moods) {
   if (!once('diary')) return false;
@@ -109,7 +125,11 @@ export function claimDiary(moods) {
   return true;
 }
 
-/* —— 插花摆进园子：起步两个花位，以后扩建到五个（扩建还没做，只存个数）——
+/* —— 扩建：付钱那一刻往后的第一个早上六点建好（凌晨三点付的，当天六点就好），garden.js 进门时对一下 —— */
+export const MORNING_H = 6;
+export function nextMorning(t = Date.now()) { const d = new Date(t); d.setHours(MORNING_H, 0, 0, 0); if (d.getTime() <= t) d.setDate(d.getDate() + 1); return d.getTime(); }
+
+/* —— 插花摆进园子：起步两个花位，扩建到五个——
    花位在 garden.js 坐标里：0–2 在右后木平台花架前沿一排，3–4 在左前小桌边的木平台上；挨着的花位以后能杂交 */
 export const VASE_SPOTS = [[2.25, -1.98], [2.68, -1.98], [3.11, -1.98], [-2.3, 2.62], [-1.98, 2.42]];
 export function vaseSlots() { let n = +get('diarytown_vase_slots', 0); if (!n) { n = 2; put('diarytown_vase_slots', n); } return Math.min(5, n); }

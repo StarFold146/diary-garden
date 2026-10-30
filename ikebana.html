@@ -16,7 +16,7 @@ button{font:inherit;color:inherit;border:0;background:0 0;cursor:pointer}
 #cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
 .top{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;pointer-events:none}
 .top h1{font-size:16px;font-weight:400;letter-spacing:.3em;flex:1}
-.top a{pointer-events:auto;padding:6px 14px;border-radius:20px;background:var(--card);font-size:12px;color:var(--ink);text-decoration:none;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12)}
+.top a{pointer-events:auto;padding:6px 12px;border-radius:20px;background:var(--card);font-size:12px;color:var(--ink);text-decoration:none;box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12)}
 .hint{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top) + 50px);text-align:center;font-size:11px;letter-spacing:.12em;color:var(--soft);z-index:4;pointer-events:none}
 .panel{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 12px);transform:translateX(-50%) rotate(-.4deg);z-index:6;width:calc(100% - 24px);max-width:420px;background:var(--card);border-radius:18px;padding:10px 12px 12px;box-shadow:0 14px 40px -16px rgba(80,50,40,.45),0 0 0 .5px rgba(90,60,50,.15)}
 .panel h3{font-size:11px;font-weight:400;letter-spacing:.2em;color:var(--soft);margin:2px 2px 4px}
@@ -47,4 +47,5 @@ button{font:inherit;color:inherit;border:0;background:0 0;cursor:pointer}
 </div>
 <div class="toast" id="toast"></div>
 <script type="module" src="./ikebana.js"></script>
+<script type="module" src="./bag.js"></script>
 </body></html>

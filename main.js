@@ -1,7 +1,9 @@
 // 日记花园 demo：进门两页照暮园资料页——先挑心情写一句，再翻到跑酷页等小螃蟹到家，后面在盖花园
 // 数据全在浏览器 IndexedDB，库版本定死 1，以后别升
+import * as Notes from './notes.js';   /* 更新说明：要排在 day.js 前面，先看有没有老存档 */
 import * as Day from './day.js';   /* 一天只给一次花和菜，换天的判断都在 day.js */
 import * as Hy from './hybrid.js';   /* 杂交出来的新花：卡片和图鉴用 */
+import './bag.js';   /* 背包：顶栏小包，看手上的种子、菜、做好的菜 */
 const $ = (s) => document.querySelector(s);
 export const MOODS = [
   { id: 'happy', zh: '开心', c: '#f2c14e' },
@@ -169,7 +171,7 @@ async function enter(write) {
   await waitFor(() => R.done); await new Promise((ok) => setTimeout(ok, 700));
   const basket = R.basket && Day.once('basket') ? Math.min(R.basket, 5) : 0;   /* 路上捡的野花也一天只收一篮 */
   for (let i = 0; i < basket; i++) await store.put({ id: 'w' + Date.now() + i, at: Date.now() - 5 * DAY, mood: MOODS[Math.floor(Math.random() * MOODS.length)].id, wild: true, x: null, z: null });
-  await G.load(await store.all()); G.start();
+  await G.load(await store.all()); G.start(); setTimeout(Notes.showIfNew, 1200);
   R.stop = true; go(-1); $("#hint").hidden = false;
 }
 const todayFlower = (all) => all.find((f) => !f.wild && f.text && Day.isToday(f.at));
@@ -190,7 +192,7 @@ if (/[?&]home\b/.test(location.search)) {
   (function bar() { if (ready) return; $('#barI').style.width = Math.min(90, (performance.now() - t0) / 60) + '%'; requestAnimationFrame(bar); })();
   gardenP.then(async (G) => {
     await G.load(await store.all()); ready = true; $('#barI').style.width = '100%';
-    await new Promise((ok) => setTimeout(ok, 350)); G.start(); go(-1); document.documentElement.classList.remove('home'); $('#hint').hidden = false;
+    await new Promise((ok) => setTimeout(ok, 350)); G.start(); setTimeout(Notes.showIfNew, 1200); go(-1); document.documentElement.classList.remove('home'); $('#hint').hidden = false;
   });
 }
 $('#menuBtn').onclick = () => { $('#card').hidden = true; $('#post').hidden = true; $('#menu').hidden = false; };
@@ -351,4 +353,6 @@ async function renderBook() {
     ul.appendChild(li);
   }
 }
+$('#mExpand').onclick = async () => { $('#menu').hidden = true; (await gardenP).openExpand(); };
+$('#mNotes').onclick = () => { $('#menu').hidden = true; Notes.show(); };
 $('#mBook').onclick = () => { $('#menu').hidden = true; renderBook(); $('#book').hidden = false; };
