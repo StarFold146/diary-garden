@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#f6efe3"/>
+  <g transform="translate(256 262) scale(1.16) translate(-272 -272)">
+  <!-- ground -->
+  <path d="M96 404 Q256 382 416 404" fill="none" stroke="#5b4a44" stroke-width="10" stroke-linecap="round" opacity=".55"/>
+  <!-- little house, back right -->
+  <g transform="translate(300 262)">
+    <path d="M0 140 V58 L52 14 L104 58 V140 Z" fill="#fbf6ec" stroke="#5b4a44" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M-10 64 L52 8 L114 64" fill="none" stroke="#9f3726" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M38 140 V100 a14 14 0 0 1 28 0 V140" fill="#9f3726" opacity=".85"/>
+  </g>
+  <!-- stem and leaves -->
+  <path d="M206 400 C204 340 210 290 214 236" fill="none" stroke="#6f7d4e" stroke-width="12" stroke-linecap="round"/>
+  <path d="M207 338 C170 330 150 302 150 280 C182 282 204 304 207 338 Z" fill="#7f8e5a"/>
+  <path d="M210 300 C240 284 262 290 276 306 C252 322 226 318 210 300 Z" fill="#7f8e5a"/>
+  <!-- flower -->
+  <g transform="translate(214 186)">
+    <g fill="#9f3726">
+      <ellipse cx="0" cy="-46" rx="30" ry="42"/>
+      <ellipse cx="0" cy="-46" rx="30" ry="42" transform="rotate(72)"/>
+      <ellipse cx="0" cy="-46" rx="30" ry="42" transform="rotate(144)"/>
+      <ellipse cx="0" cy="-46" rx="30" ry="42" transform="rotate(216)"/>
+      <ellipse cx="0" cy="-46" rx="30" ry="42" transform="rotate(288)"/>
+    </g>
+    <circle r="22" fill="#f6efe3"/>
+    <circle r="10" fill="#e3b45a"/>
+  </g>
+  </g>
+</svg>

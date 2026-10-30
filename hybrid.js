@@ -32,7 +32,6 @@ const nearest = (arr, v) => arr.reduce((bi, x, i) => Math.abs(x - v) < Math.abs(
 export const colorGenes = (hex) => { const [h, s, l] = hexToHsl(hex); return { hue: Math.round(h / 10) % 36, sat: nearest(SAT, s), lit: nearest(LIT, l) }; };
 export const hexOf = (g) => hslToHex(g.hue * 10, SAT[clamp(g.sat, 0, 4)], LIT[clamp(g.lit, 0, 4)]);
 
-/* —— 底子：日记的七种心情花，名字和基因。名字跟作物心跳莓一个路子，给自动起名用（晴铃花 × 怦心兰 → 铃怦） —— */
 const base = (id, zh, c, g) => ({ id, zh, c, base: true, genes: { form: 0, dbl: 0, ...colorGenes(c), ...g } });
 export const SPECIES = {
   happy: base('happy', '晴铃花', '#f2c14e', { n: 8, shape: 1, notch: 0, cup: 0, ruffle: 1, size: 2, height: 2 }),

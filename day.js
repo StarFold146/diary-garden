@@ -2,7 +2,7 @@
 // 别的都拿花币买。所有「今天做过没有」都在这儿判，按手机本地时间零点换天。
 // 存 localStorage：diarytown_daily（每件事最后做的那天）、diarytown_coins、diarytown_seeds（花种子，粒）、
 // diarytown_pantry（厨房的菜，份）、diarytown_vase_slots、diarytown_vases_placed
-import * as Hy from './hybrid.js';   /* 杂交出来的新花也上种子铺（hybrid.js 只算不画） */
+import * as Hy from './hybrid.js';   /* 杂交出来的新花也上种子铺 */
 const get = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
 const put = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
@@ -30,11 +30,11 @@ export const FLOWER_SEEDS = {
 export const CROP_SEEDS = {
   thoughtleaf: { zh: '杂思菜', p: 8 }, tiderice: { zh: '潮汐稻', p: 8 }, boltbean: { zh: '向光葵', p: 8 },
   heartberry: { zh: '心跳莓', p: 12 }, lanternplant: { zh: '灯笼茄', p: 12 }, twinpeach: { zh: '双生桃', p: 12 }, palettemelon: { zh: '调色瓜', p: 12 },
-  bloom: { zh: '心浪花', p: 16 },
+  bloom: { zh: '心绪花', p: 16 },
 };
 /* 种子铺里的花：底下这十二种 + 园子里配出来的新花（键是新花 id） */
 export const flowerSeeds = () => ({ ...FLOWER_SEEDS, ...Hy.seedItems() });
-/* 疏密 → 一丛要几粒（garden.js 的 DENS 是 6/11/18 株） */
+/* 疏密 → 一丛要几粒 */
 export const seedCost = (n) => n <= 6 ? 1 : n <= 11 ? 2 : 3;
 
 /* —— 花种子（粒） —— */
@@ -72,7 +72,7 @@ export function placeVase(v) {
 }
 export function unplaceVase(id) { put('diarytown_vases_placed', placedVases().filter((x) => x.id !== id)); }
 
-/* —— 店面外观（花钱改店面）：shop/house.js 的 DECOR 选项按名字标价，买过的随便换 ——
+/* —— 店面外观：shop/house.js 的 DECOR 选项按名字标价，买过的随便换 ——
    一天卖菜七八十花币，墙/底/遮阳篷一样攒一个礼拜左右，爬藤和门口小摊再贵一点。起步的样子（花园里那栋）不要钱 */
 export const DECOR_START = { wall: '奶油', base: '墨绿', awning: '粉白', ivy: 0, stall: '不摆' };
 export const DECOR_PRICE = {

@@ -43,7 +43,7 @@ R.setPixelRatio(Math.min(1.5, devicePixelRatio)); R.outputColorSpace = THREE.SRG
 R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap; R.setSize(innerWidth, innerHeight, false);
 const S = new THREE.Scene(); S.background = new THREE.Color('#fbfaf6'); S.fog = new THREE.Fog('#fbfaf6', 7, 16);
 const CAM = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, .05, 40);
-/* 白纸底、中性白光，影子偏一点冷，粉是粉、蓝是蓝（暖光太重粉花像枯叶） */
+/* 白纸底、中性白光，影子偏一点冷，粉是粉、蓝是蓝 */
 S.add(new THREE.HemisphereLight('#ffffff', '#c3ced8', 1.5));
 const SUN = new THREE.DirectionalLight('#ffffff', 1.9); SUN.position.set(-2.5, 5, 3.5); SUN.target.position.set(0, .4, 0);
 SUN.castShadow = true; SUN.shadow.mapSize.set(1024, 1024); Object.assign(SUN.shadow.camera, { left: -2.2, right: 2.2, top: 2.2, bottom: -2.2, near: .5, far: 20 });
@@ -86,7 +86,7 @@ function surf(NU, NV, fn) {
 }
 const skin = (c, o = {}) => mat(c, { side: THREE.DoubleSide, vertexColors: true, ...o });
 
-// ---------- 花瓣（照 画/樱花/sakura.py）：u 沿瓣长 0 根→1 梢，v 横向 -1..1 ----------
+// ---------- 花瓣：u 沿瓣长 0 根→1 梢，v 横向 -1..1 ----------
 const petalCache = new Map();
 function petalGeo({ L = .16, Wd = .12, cup = 1, reflex = 1, ruffle = 1, notch: notch0 = null, seed = 0, key = '' }) {
   const k = key + ':' + seed + ':' + L + ':' + Wd + ':' + cup + ':' + reflex + ':' + ruffle + ':' + notch0; if (petalCache.has(k)) return petalCache.get(k);
@@ -160,7 +160,7 @@ function bend(a, d, len, tilt, r, lateral = .05, pre = null) {
   const tip = a.clone().addScaledVector(d, len).add(new THREE.Vector3(0, -tilt * len * .11, 0)).addScaledVector(side, wob * .4);
   return new THREE.CatmullRomCurve3(pre ? [pre, a, p1, p2, tip] : [a, p1, p2, tip], false, 'centripetal', .6);
 }
-/* 整根枝：口下面一截竖直（在瓶子里、在水里），到口才按方向弯出去。这样细颈瓶的配叶不会从肩膀穿出来 */
+/* 整根枝：口下面一截竖直（在瓶子里、在水里），到口才按方向弯出去。截图：细颈瓶的配叶从肩膀穿出来，就是原来从底下起笔就斜着走 */
 function stemPath(root, a, d, len, tilt, r, lateral) {
   const a0 = a.clone().add(new THREE.Vector3(0, -.04, 0)), path = new THREE.CurvePath();
   path.add(new THREE.LineCurve3(root, a0)); path.add(bend(a, d, len, tilt, r, lateral, a0));
@@ -430,7 +430,7 @@ $('#save').onclick = async () => {
     d.close();
     /* 摆进园子：找空花位（起步两个），满了就先收在库里 */
     const put = Day.placeVase({ id: rec.id, vase: rec.vase, at: rec.at, colors: rec.stems.map((s) => s.filler ? 'leaf' : Hy.hexOf(Hy.genesOf({ species: s.species }))), species: rec.stems.map((s) => s.species) });   /* species 给杂交认爸妈 */
-    toast('存在这台设备里了，园子还在路上');
+    toast(put ? `摆到园子里了，第 ${put.slot + 1} 个花位` : `园子里 ${Day.vaseSlots()} 个花位都摆满了，这盆先收着`);
   } catch (e) { toast('没存上'); }
 };
 $('#png').onclick = async () => {
@@ -446,7 +446,7 @@ $('#png').onclick = async () => {
   pool = all.filter((f) => !f.wild && now - f.at >= 3 * DAY && now - f.at < 14 * DAY).sort((a, b) => b.at - a.at);
   if (!pool.length) { pool = SAMPLES; $('#flTitle').textContent = '花 园 里 还 没 开 花，先 拿 样 例 插'; }
   fillPanel(); setVase('bottle'); resize();
-  /* 只在有变化的时候画（手机上省电） */
+  /* 只在有变化的时候画 */
   CTL.addEventListener('change', () => { dirty = true; });
   R.setAnimationLoop(() => { CTL.update(); if (dirty) { dirty = false; LOOK.render(S, CAM); } });
   window.__ike = { addStem, Hy, pool: () => pool, setVase, stems: () => stems, sel: select, screen: (st) => { const v = st.hit.getWorldPosition(new THREE.Vector3()).project(CAM); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; } };
