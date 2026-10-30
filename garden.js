@@ -12,9 +12,11 @@ import * as TM from './town/mem.js';
 import * as LAND from './town/land.js';
 import * as FR from './town/fr.js';
 import * as SP from './town/species.js';   /* 应季菜（南瓜、栗子、柿子）照说明长，田里用 */
+import * as AU from './autumn.js';   /* 秋天三样：南瓜趴在藤上、栗子挂刺壳、柿子顶着柿蒂，不再是圆球 */
 import * as Day from './day.js';   /* 种子、花位、换天 */
 import * as Hy from './hybrid.js';   /* 杂交：两盆挨着过一夜冒苗 */
 import { buildFarHills } from './hills.js';   /* 远山 */
+import { hang } from './hang.js';   /* 你的果树果子都悬着。小镇画完整株，这边给果子补枝补果柄（hang.js） */
 
 /* 量 init 每一步花多久 */
 let stage = '';
@@ -1072,10 +1074,11 @@ function sproutModel(stage, k) {
 function cropModel(p, k) {
   const st = plotStage(p), kind = p.kind, sp = TM.SPECIES[kind];
   if (st <= 1) return sproutModel(st, k);   /* 小镇作物的「小苗」是褪了色的样子（那边是记忆快忘了），田里自己画一根绿苗 */
-  if (sp && sp.spec) return SP.plant(sp.spec, st, k);
+  if (AU.has(kind)) return AU.plant(kind, st, k);   /* 秋天三样用自己的样子（autumn.js） */
+  if (sp && sp.spec) return hang(SP.plant(sp.spec, st, k), kind);
   if (kind === 'bloom' && st < 3) return sproutModel(st, k); 
   if (!DOMAIN_OF[kind] && kind !== 'bloom') return sproutModel(Math.min(st, 2), k);
-  return TM.plant({ kind: kind === 'bloom' ? 'feel' : 'mem', w: st === 2 ? 7 : 10 + (k % 3) * 1.5, domain: [DOMAIN_OF[kind]], id: 'farm' + k }, k);
+  return hang(TM.plant({ kind: kind === 'bloom' ? 'feel' : 'mem', w: st === 2 ? 7 : 10 + (k % 3) * 1.5, domain: [DOMAIN_OF[kind]], id: 'farm' + k }, k), kind);   /* 双生桃吊在小枝上、潮汐稻穗子回到秆尖、矮丛的果子连上叶子 */
 }
 function setupField() {
   TM.useSpecies(Day.seasonSpecs());   /* 南瓜、栗子、柿子登记进小镇的作物表，田里才画得出来 */

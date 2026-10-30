@@ -59,19 +59,58 @@ async function gather() {
   /* 今天第一篇日记的菜还没领（早上在别处写的、或者改版前写的），这里补领一次 */
   const first = all.filter((f) => Day.isToday(f.at)).sort((a, b) => a.at - b.at)[0];
   if (first) Day.claimDiary(first.moods && first.moods.length ? first.moods : [first.mood]);
-  /* 食材只从菜篮子里拿：今天心情的排前面，剩下按存货多少，最多六样；田里不再白送 */
+  species = basket().slice(0, 6);
+}
+/* 食材只从菜篮子里拿：今天心情的排前面，剩下按存货多少；田里不再白送。挑菜那张纸也按这个顺序排 */
+function basket() {
   const p = Day.pantry(), ks = [];
   for (const id of moodIds) { const k = MOODS[id].k; if (p[k] > 0 && !ks.includes(k)) ks.push(k); }
   Object.keys(p).filter((k) => p[k] > 0 && !ks.includes(k)).sort((a, b) => p[b] - p[a]).forEach((k) => ks.push(k));
-  species = ks.slice(0, 6);
+  return ks;
+}
+
+/* 挑菜：生火前先翻菜篮子，一样一块牌子，点一下选上、再点放回去，最多六样。
+   先替她勾好的还是原来那一套：今天心情的菜排前面，不够六样按存货多的补。再来一盘回到这里，上一盘挑的还有货就接着勾着 */
+const PICK_MAX = 6;
+let pick = [];
+function showPicker(keep) {
+  const p = Day.pantry(), ks = basket();
+  if (!ks.length) { species = []; fire(); return; }   /* 篮子空了：走生火那边原来的空篮子话 */
+  const mine = new Set(moodIds.map((id) => MOODS[id].k));
+  pick = (keep || []).filter((k) => p[k] > 0).slice(0, PICK_MAX);
+  if (!pick.length) pick = ks.slice(0, PICK_MAX);
+  const box = $('picks');
+  box.innerHTML = '';
+  for (const k of ks) {
+    const b = document.createElement('button');
+    b.dataset.k = k;
+    b.innerHTML = '<img alt="" src="icons/items/c-' + k + '.webp"><span>' + Day.cropZh(k) + '</span><small>× ' + p[k] + '</small>' + (mine.has(k) ? '<i>今天</i>' : '');
+    b.querySelector('img').onerror = (e) => { e.target.style.visibility = 'hidden'; };
+    b.onclick = () => {
+      const at = pick.indexOf(k);
+      if (at >= 0) pick.splice(at, 1);
+      else if (pick.length >= PICK_MAX) { box.classList.remove('full'); void box.offsetWidth; box.classList.add('full'); toast('一锅最多六样'); return; }
+      else pick.push(k);
+      paint();
+    };
+    box.appendChild(b);
+  }
+  const paint = () => {
+    box.querySelectorAll('button').forEach((b) => b.classList.toggle('on', pick.includes(b.dataset.k)));
+    $('pkCnt').textContent = pick.length ? '挑了 ' + pick.length + ' 样 · 最多六样' : '一样都没挑';
+    $('fireBtn').disabled = !pick.length;
+  };
+  paint();
+  go(1);
+  loadMods().catch(() => { mods = null; });   /* 挑菜的时候先把锅灶搬进来，生火快一点 */
 }
 
 let mods = null;
-const loadMods = () => mods || (mods = Promise.all([import('three'), import('three/addons/controls/OrbitControls.js'), import('./shop/look.js'), import('./town/look2.js'), import('./town/mem.js'), import('./town/food.js')]));
+const loadMods = () => mods || (mods = Promise.all([import('three'), import('three/addons/controls/OrbitControls.js'), import('./shop/look.js'), import('./town/look2.js'), import('./town/mem.js'), import('./town/food.js'), import('./autumn.js')]));   /* 最后那个是秋天三样的小件和盛器 */
 
 /* 生火中：进度条 2.1 秒缓出，提示每 0.7 秒换一句，模块到了再进厨房（暮园原样） */
 async function fire() {
-  go(2);
+  go(2); $('ld').textContent = '生 火 中';
   const bar = $('barI'), t0 = performance.now(), dur = 2100;
   bar.style.width = '0';
   let ti = 0;
@@ -90,7 +129,7 @@ async function fire() {
 }
 
 let K3 = null;
-function kitchen([THREE, { OrbitControls }, L, L2, M, F], picked) {
+function kitchen([THREE, { OrbitControls }, L, L2, M, F, AU], picked) {
   const ORDER = ['tiderice', 'thoughtleaf', 'boltbean', 'twinpeach', 'velvetgrape', 'palettemelon', 'lanternplant', 'heartberry', 'bloom'];
   /* 应季菜：登记进小镇菜谱（长样子、切小件、单做的菜名），排位照 mem.js 插在心跳莓前面 */
   M.useSpecies(Day.seasonSpecs());
@@ -126,7 +165,7 @@ function kitchen([THREE, { OrbitControls }, L, L2, M, F], picked) {
     return h ? h.point.y : null;
   }
   function addPiece(k, x, z, rot, seed) {
-    const s = seed ?? seedN++, p = F.piece(k, s);
+    const s = seed ?? seedN++, p = AU.piece(k, s) || F.piece(k, s);   /* 南瓜块、炒栗子、柿子片走 autumn.js */
     p.userData.seed = s; L.outline(p, { w: .005 }); L.shadowAll(p);
     let y = x !== undefined ? surfaceY(x, z) : null;
     for (let i = 0; y === null && i < 30; i++) {
@@ -143,14 +182,15 @@ function kitchen([THREE, { OrbitControls }, L, L2, M, F], picked) {
   }
   function rebuild() {
     if (vessel) group.remove(vessel);
-    vessel = Day.tintVessel(F.vessel(Day.seasonVessel(kinds()[0]), form), kinds()[0], form); L.outline(vessel, { w: .008 }); L.shadowAll(vessel);
+    /* 秋天的菜原样做换成自己的盛器：南瓜汤、糖炒栗子、柿子布丁，两样凑成隐藏菜就是砂锅、糕、羹（autumn.js） */
+    vessel = AU.vessel(kinds(), form) || Day.tintVessel(F.vessel(Day.seasonVessel(kinds()[0]), form), kinds()[0], form); L.outline(vessel, { w: .008 }); L.shadowAll(vessel);
     group.add(vessel); group.updateMatrixWorld(true); frame();
     const extra = F.EXTRA[form] || [], keep = pieces.filter((p) => picked.includes(p.userData.piece) || extra.includes(p.userData.piece));
     pieces.forEach((p) => group.remove(p)); pieces = [];
     keep.forEach((p) => addPiece(p.userData.piece, p.position.x, p.position.z, p.rotation.y, p.userData.seed));
     const d = dishName();
-    $('dish').innerHTML = '<b>' + d.name + '</b><small>' + F.VESSEL_NAME[vessel.userData.kind] + (d.special ? ' · 隐藏菜' : '') + ' · ' + d.about + '</small>';
-    $('pieces').innerHTML = [...extra, ...kinds()].map((k) => '<button class="add" data-k="' + k + '">＋' + F.pieceName(k) + (picked.includes(k) ? '<small style="opacity:.6"> ' + (Day.pantry()[k] || 0) + '</small>' : '') + '</button>').join('');
+    $('dish').innerHTML = '<b>' + d.name + '</b><small>' + (AU.VESSEL_NAME[vessel.userData.kind] || F.VESSEL_NAME[vessel.userData.kind]) + (d.special ? ' · 隐藏菜' : '') + ' · ' + d.about + '</small>';
+    $('pieces').innerHTML = [...extra, ...kinds()].map((k) => '<button class="add" data-k="' + k + '">＋' + (AU.pieceName(k) || F.pieceName(k)) + (picked.includes(k) ? '<small style="opacity:.6"> ' + (Day.pantry()[k] || 0) + '</small>' : '') + '</button>').join('');
     document.querySelectorAll('#forms button').forEach((b) => b.classList.toggle('on', b.dataset.f === form));
     dirty = true;
   }
@@ -278,7 +318,8 @@ $('rcBtn').onclick = () => { $('hpSheet').hidden = true; renderRecipes(); $('rcS
 $('hpBtn').onclick = () => { $('rcSheet').hidden = true; $('hpSheet').hidden = !$('hpSheet').hidden; };
 $('hpClose').onclick = () => { $('hpSheet').hidden = true; };
 $('rcClose').onclick = () => { $('rcSheet').hidden = true; };
-/* 再来一盘：暮园是回去重挑心情；这里心情是日记定的，就重新生火、同一把食材再摆一盘 */
-$('again').onclick = () => { species = []; fire(); };   /* 重新看菜篮子，用完的那样就没了 */
+/* 再来一盘：暮园是回去重挑心情；这里回到挑菜那张，上一盘的还有货就照旧勾着，用完的那样就没了 */
+$('again').onclick = () => showPicker(species);
+$('fireBtn').onclick = () => { if (!pick.length) return; species = pick.slice(); fire(); };
 
-gather().then(fire);
+gather().then(() => showPicker());

@@ -22,6 +22,8 @@ export function spend(n) { const c = coins(); if (c < n) return false; setCoins(
 /* 换了物价：起步 500。老存档第一次打开时不够 500 的补到 500，只补这一回（diarytown_econ_v2） */
 export const START_COINS = 500;
 if (!get('diarytown_econ_v2', false)) { if (coins() < START_COINS) setCoins(START_COINS); put('diarytown_econ_v2', 1); }
+export const GIFT_130 = 200;
+if (!get('diarytown_gift130', false)) { setCoins(coins() + GIFT_130); put('diarytown_gift130', 1); }
 
 /* —— 种子铺的价钱：花种子一包 3 粒，种一丛稀 1 粒、中 2 粒、密 3 粒；菜种子一包 2 粒，田里一粒收 1–3 份 ——
    200 起步一包都买不起。现在卖一盘菜（四五十到七八十）差不多换一包种子，一天做两三盘、打烊能买一到三包 */

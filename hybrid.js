@@ -88,10 +88,16 @@ Object.assign(SPECIES, {
 Object.assign(SPECIES, {
   weiwei: { ...base('weiwei', String.fromCharCode(21807, 21807, 33457), '#f6a3c0', { n: 6, dbl: 1, shape: 3, notch: 1, cup: 2, ruffle: 2, form: 4, size: 3, height: 3 }), rare: true, gift: true, grad: ['#ea6b97', '#fde3ec'] },
   lanlan: { ...base('lanlan', String.fromCharCode(23706, 23706, 33457), '#8cc4ec', { n: 6, shape: 0, notch: 0, cup: 1, ruffle: 0, form: 8, size: 2, height: 4 }), rare: true, gift: true, grad: ['#6fb6e8', '#eef7fc'] },
+  /* 蓝紫饱和度有点高，「是很温柔的颜色」。两色都褪成雾：紫换雾薰衣草紫，蓝换粉蓝，还是一紫一蓝两样 */
+  yingyan: { ...base('yingyan', String.fromCharCode(24212, 23476, 38083), '#a9a9d1', { n: 5, shape: 2, notch: 0, cup: 2, ruffle: 0, form: 2, size: 3, height: 4 }), rare: true, gift: true, grad: ['#9675b8', '#a7c8e2', '#e1e9f4'], look: 'campanula' },
+  yinglan: { ...base('yinglan', String.fromCharCode(24212, 23476, 20848), '#a6b5d9', { n: 5, shape: 3, notch: 0, cup: 1, ruffle: 0, form: 2, size: 3, height: 4 }), rare: true, gift: true, grad: ['#a4b5da', '#cfd8ed'], lip: '#997cb6', look: 'orchid' }, 
+  yinghui: { ...base('yinghui', String.fromCharCode(24212, 23476, 34137), '#aab3d8', { n: 5, shape: 1, notch: 0, cup: 1, ruffle: 0, form: 2, size: 2, height: 4 }), rare: true, gift: true, grad: ['#9a84bf', '#a9c3e0', '#e2e9f4'], lip: '#a48ac2', look: 'cymbidium' },
 });
 export const gifts = () => Object.values(SPECIES).filter((s) => s.gift);
+export const lookOf = (f) => { const s = f && f.species && SPECIES[f.species]; return s && s.look ? s.look : null; };
 /* 能不能当爸妈：送人的花不参与杂交 */
 export const canBreed = (id) => { const s = speciesById(id); return !!s && !s.gift; };
+export const lipOf = (f) => { const s = f && f.species && SPECIES[f.species]; return s && s.lip ? s.lip : null; }; 
 export const gradOf = (f) => { const s = f && f.species && SPECIES[f.species]; return s && s.grad ? s.grad : null; };
 const monthOf = (now) => (now instanceof Date ? now : new Date(now || Date.now())).getMonth() + 1;
 export const inSeason = (id, now) => { const s = SPECIES[id]; return !!s && (!s.season || s.season.includes(monthOf(now))); };

@@ -278,6 +278,150 @@ function bellGeo({ R = .02, H = .03, n = 6, flare = .5, ruffle = .3, seed = 0 })
   });
   bellCache.set(k, g); return g;
 }
+/* 风铃草的铃：比铃兰的大一圈、口张得开，挂点在上、口朝下。
+   u 沿铃身 0 挂点→1 口沿（渐变照 u 走，根深梢浅），v 绕一圈；口上五个圆裂片，裂片中间长、缺口短，梢头往外翻一点，不出尖 */
+const campCache = new Map();
+function campGeo({ R = .05, H = .07, flare = .5, seed = 0 }) {
+  const k = [R, H, flare, seed].join(':'); if (campCache.has(k)) return campCache.get(k);
+  const ph = rng(seed + 11)() * 6.28;
+  const g = surf(16, 40, (u, v) => {
+    const a = (v + 1) / 2 * Math.PI * 2, lobe = Math.pow((1 + Math.cos(a * 5 + ph)) / 2, .6), lip = Math.max(0, u - .6) / .4;
+    let rad = R * (.2 + .8 * Math.pow(Math.sin(Math.min(1, u / .88) * Math.PI / 2), 1.15));   /* 上窄下宽的钟 */
+    rad += R * flare * lip * lip * (.3 + .7 * lobe);   /* 裂片往外撇，缺口那儿撇得少 */
+    const y = -H * (u - .22 * lip * lip * (1 - lobe)) + H * .1 * Math.pow(lip, 3) * lobe;   /* 缺口短一截；裂片梢头轻轻往上翘 */
+    return [Math.cos(a) * rad, y, Math.sin(a) * rad, .8 + .26 * u];
+  });
+  campCache.set(k, g); return g;
+}
+/* 风铃草上色：G = [紫, 天蓝, 边]。铃根饱和的紫，u 在 .38–.62 之间一道看得见的过渡带换成天蓝；
+   五条脉顺着裂片中线把紫往下拖进蓝里；裂片边再浅一点。颜色乘上原来的根深梢浅 */
+const campPaintCache = new Map();
+function campPaint(geo, G, seed) {
+  const k = geo.uuid + G.join(); if (campPaintCache.has(k)) return campPaintCache.get(k);
+  const g = geo.clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), [V, B, E] = G.map((c) => new THREE.Color(c)), c = new THREE.Color(), ph = rng(seed + 11)() * 6.28;
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), a = uv.getY(i) * Math.PI * 2, cl = (1 + Math.cos(a * 5 + ph)) / 2, sh = col.getX(i);
+    c.copy(V).lerp(B, ss(.38, .62, u));
+    c.lerp(V, .75 * Math.pow(cl, 22) * (1 - ss(.6, .97, u)));   /* 脉 */
+    c.lerp(E, .55 * ss(.86, 1, u) * (.4 + .6 * Math.pow(cl, .6)));   /* 裂片边 */
+    col.setXYZ(i, c.r * sh, c.g * sh, c.b * sh);
+  }
+  col.needsUpdate = true; campPaintCache.set(k, g); return g;
+}
+/* 一朵风铃草：铃身 + 顶上一圈小萼 + 里面一根白花柱探出来 */
+function campanula(G, s, seed) {
+  const g = new THREE.Group(), R = .04 * s, H = .078 * s;
+  const m = new THREE.Mesh(campPaint(campGeo({ R, H, flare: .38, seed: seed % 3 }), G, seed % 3), mat('#ffffff', { side: THREE.DoubleSide, vertexColors: true, emissive: G[1], emissiveIntensity: .08 })); m.userData.lineW = .0013; g.add(m);
+  const sty = new THREE.Mesh(new THREE.CylinderGeometry(.0011 * s, .0016 * s, H * .8, 5), mat('#f4f1fb')); sty.position.y = -H * .45; sty.userData.noLine = true; g.add(sty);
+  const tipG = new THREE.Mesh(new THREE.SphereGeometry(.0032 * s, 6, 4), mat('#f8f6fd')); tipG.position.y = -H * .82; tipG.userData.noLine = true; g.add(tipG);
+  for (let i = 0; i < 5; i++) { const pv = new THREE.Group(); pv.rotation.y = i / 5 * Math.PI * 2 + .3; const l = new THREE.Mesh(leafGeo({ L: .028, W: .008, kind: 'lance', seed: i + 3 }), skin('#7f9c55')); l.userData.noLine = true; l.rotation.x = Math.PI / 2 + .6; l.position.y = -.004 * s; l.scale.setScalar(s); pv.add(l); g.add(pv); }
+  const cup = new THREE.Mesh(new THREE.SphereGeometry(.007 * s, 8, 6), mat('#86a05a')); cup.scale.y = 1.3; cup.userData.lineW = .001; g.add(cup);
+  return g;
+}
+/* 一朵兰花：照蝴蝶兰，脸是平的，朝 +Y；
+   局部 -Z 是花脸的「上」：上面一片背萼，两侧两片又宽又圆的花瓣，下面左右两片侧萼，正下方一片唇瓣往前探。
+   瓣都是圆头（tipPt 0），瓣是长春花蓝、瓣根一截透紫、瓣缘只浅一点；唇瓣浓紫，两边小侧裂片竖起来，喉口一点淡黄，中间一根白蕊柱 */
+/* 兰瓣的颜色分三段：瓣根一截紫（lip），往外过到蓝（c0），到瓣缘只浅一点（c1） */
+const triCache = new Map();
+function triGeo(geo, cl, c0, c1) {
+  const k = geo.uuid + cl + c0 + c1; if (triCache.has(k)) return triCache.get(k);
+  const g = geo.clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), L = new THREE.Color(cl), A = new THREE.Color(c0), B = new THREE.Color(c1), c = new THREE.Color();
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), sh = col.getX(i);
+    if (u < .38) c.copy(L).lerp(A, Math.pow(Math.max(0, u - .08) / .3, 1.3)); else c.copy(A).lerp(B, Math.pow((u - .38) / .62, 1.4));
+    col.setXYZ(i, c.r * sh, c.g * sh, c.b * sh);
+  }
+  col.needsUpdate = true; triCache.set(k, g); return g;
+}
+/* 蓝紫饱和度有点高。唇瓣的紫和往深、往浅调的两头都褪成雾紫，不再压一块浓紫 */
+function orchid(c0, c1, s, seed, lip = '#997cb6') {
+  const r = rng(seed), g = new THREE.Group();
+  const lipA = lerpHex(lip, '#6e558b', .25), lipB = lerpHex(lip, '#cbbcdc', .35);
+  const piece = (o, a, lift, ca, cb, pw, sc = 1, y = 0) => {
+    const pv = new THREE.Group(); pv.rotation.y = a + (r() - .5) * .06;
+    const geo = petalGeo({ notch: 0, tipPt: 0, ...o, key: 'o' }), m = new THREE.Mesh(ca === c0 ? triGeo(geo, lip, c0, c1) : gradGeo(geo, ca, cb, pw), mat('#ffffff', { side: THREE.DoubleSide, vertexColors: true, emissive: cb, emissiveIntensity: .12 }));
+    m.userData.noLine = true; m.rotation.x = -Math.PI / 2 + lift; m.position.y = y * s; m.scale.setScalar(s * sc); pv.add(m); g.add(pv); return m;
+  };
+  /* 背萼、两片侧萼：椭圆，比花瓣窄一点 */
+  piece({ L: .078, Wd: .066, cup: .35, reflex: .15, ruffle: .05, waist: .55, seed: seed * 5 + 1 }, 0, .14, c0, c1, 1.1);
+  for (const k of [-1, 1]) piece({ L: .074, Wd: .062, cup: .35, reflex: .15, ruffle: .05, waist: .55, seed: seed * 5 + 2 + (k > 0) }, k * 2.45, .12, c0, c1, 1.1);
+  /* 两片花瓣：最宽最圆，盖在萼上面一点 */
+  for (const k of [-1, 1]) piece({ L: .082, Wd: .11, cup: .3, reflex: .1, ruffle: .08, waist: .62, seed: seed * 5 + 4 + (k > 0) }, k * 1.3, .18, c0, c1, 1.25, 1, .002);
+  /* 唇瓣：中裂片往前探、兜一点；两侧小裂片竖起来抱着蕊柱 */
+  piece({ L: .05, Wd: .046, cup: 1.4, reflex: .35, ruffle: .1, waist: .6, seed: seed * 5 + 7 }, Math.PI, .5, lipA, lipB, .9, 1, .006);
+  for (const k of [-1, 1]) piece({ L: .03, Wd: .028, cup: 1.2, reflex: .1, ruffle: 0, waist: .55, seed: seed * 5 + 8 }, Math.PI + k * .75, 1.05, lipA, lipB, .8, 1, .005);
+  const thr = new THREE.Mesh(new THREE.SphereGeometry(.0085 * s, 10, 8), mat('#f3d97c', { emissive: '#f3d97c', emissiveIntensity: .2 })); thr.scale.set(1, .5, .8); thr.position.set(0, .009 * s, .008 * s); thr.userData.noLine = true; g.add(thr);   /* 喉口那点淡黄 */
+  const pale = new THREE.Mesh(new THREE.SphereGeometry(.006 * s, 8, 6), mat('#fbf6e6')); pale.scale.set(1.3, .4, .7); pale.position.set(0, .008 * s, .015 * s); pale.userData.noLine = true; g.add(pale);
+  const col = new THREE.Mesh(new THREE.SphereGeometry(.0055 * s, 8, 6), mat('#f8f6fc')); col.scale.set(.8, 1.1, 1.6); col.position.set(0, .012 * s, -.002 * s); col.userData.noLine = true; g.add(col);   /* 蕊柱 */
+  return g;
+}
+/* 让一朵花的脸（局部 +Y）朝 F，花脸的「上」（局部 -Z）尽量朝 U */
+function orient(o, F, U) {
+  const Y = F.clone().normalize(), Z = U.clone().addScaledVector(Y, -U.dot(Y)).normalize().negate(), X = new THREE.Vector3().crossVectors(Y, Z);
+  o.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+}
+/* 国兰：春兰蕙兰那样的小花，脸朝 +Y，局部 -Z 是花脸的「上」。
+   三片窄萼片摊成星（背萼朝上，两片侧萼往两边斜下），两片小花瓣往前兜着蕊柱，唇瓣小、往外卷，奶白上几点淡斑。瓣梢都是圆的。
+   颜色：瓣根雾紫往外过到粉蓝，梢头再浅一点，中脉一道淡淡的紫（G 是 [紫, 蓝, 梢]） */
+const cymCache = new Map();
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function cymPaint(geo, G) {
+  const k = geo.uuid + G.join(); if (cymCache.has(k)) return cymCache.get(k);
+  const g = geo.clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), [A, B, E] = G.map((c) => new THREE.Color(c)), c = new THREE.Color();
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i) * 2 - 1, sh = .35 + .65 * col.getX(i);
+    c.copy(A).lerp(B, smooth(.3, .82, u)); c.lerp(E, .55 * smooth(.82, 1, u)); c.lerp(A, .4 * Math.exp(-Math.pow(v / .18, 2)) * (1 - smooth(.55, .95, u)));
+    col.setXYZ(i, c.r * sh, c.g * sh, c.b * sh);
+  }
+  col.needsUpdate = true; cymCache.set(k, g); return g;
+}
+/* 唇瓣：奶白，根上带一点雾紫，几点淡斑（斑是 lip 那个色） */
+const CYM_SPOTS = [[.34, 0], [.44, -.42], [.44, .42], [.6, -.18], [.6, .22], [.74, -.46], [.76, .4]];
+function cymLip(geo, lip) {
+  const k = geo.uuid + 'lip' + lip; if (cymCache.has(k)) return cymCache.get(k);
+  const g = geo.clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), S = new THREE.Color(lip), W = new THREE.Color('#f7f3f4'), c = new THREE.Color();
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i) * 2 - 1, sh = .45 + .55 * col.getX(i);
+    let sp = 0; for (const [su, sv] of CYM_SPOTS) sp = Math.max(sp, Math.exp(-Math.pow((u - su) / .07, 2) - Math.pow((v - sv) / .17, 2)));
+    c.copy(W).lerp(S, .4 * (1 - smooth(.05, .3, u))).lerp(S, .8 * sp);
+    col.setXYZ(i, c.r * sh, c.g * sh, c.b * sh);
+  }
+  col.needsUpdate = true; cymCache.set(k, g); return g;
+}
+function cymbidium(G, lip, s, seed) {
+  const r = rng(seed), g = new THREE.Group();
+  const piece = (o, a, lift, geo2, y = 0) => {
+    const pv = new THREE.Group(); pv.rotation.y = a + (r() - .5) * .08;
+    const m = new THREE.Mesh(geo2(petalGeo({ notch: 0, tipPt: 0, ruffle: 0, ...o, key: 'c' })), mat('#ffffff', { side: THREE.DoubleSide, vertexColors: true, emissive: G[1], emissiveIntensity: .1 }));
+    m.userData.noLine = true; m.rotation.x = -Math.PI / 2 + lift; m.position.y = y * s; m.scale.setScalar(s); pv.add(m); g.add(pv); return m;
+  };
+  const tint = (geo) => cymPaint(geo, G);
+  /* 三片萼：窄长，圆头，摊成一颗星 */
+  piece({ L: .078, Wd: .028, cup: .45, reflex: .3, waist: .5, seed: seed % 4 + 1 }, 0, .1, tint);
+  for (const k of [-1, 1]) piece({ L: .074, Wd: .027, cup: .45, reflex: .35, waist: .5, seed: seed % 4 + 2 + (k > 0) }, k * 2.05, .08, tint);
+  /* 两片花瓣：短一些，往前合着，兜住蕊柱 */
+  for (const k of [-1, 1]) piece({ L: .048, Wd: .026, cup: 1, reflex: .05, waist: .55, seed: seed % 4 + 5 }, k * .42, .78, tint, .002);
+  /* 唇瓣：小，先往前探，梢头往下外卷 */
+  piece({ L: .036, Wd: .032, cup: .8, reflex: 1.3, ruffle: .1, waist: .55, seed: seed % 4 + 7 }, Math.PI, .95, (geo) => cymLip(geo, lip), .003);
+  const colm = new THREE.Mesh(new THREE.SphereGeometry(.0048 * s, 8, 6), mat('#f6f2fa')); colm.scale.set(.75, 1, 2.2); colm.position.set(0, .012 * s, -.006 * s); colm.userData.noLine = true; g.add(colm);   /* 蕊柱 */
+  const ov = new THREE.Mesh(new THREE.SphereGeometry(.004 * s, 8, 6), mat('#8ea769')); ov.scale.set(1, 1.8, 1); ov.position.y = -.004 * s; ov.userData.noLine = true; g.add(ov);   /* 子房 */
+  return g;
+}
+/* 国兰的叶：又长又细的一条，从基部往外拱、过了最高点往下垂，梢头慢慢收细；顺着走向带一点拧，中脉两边微微往上折 */
+function grassLeaf(curve, W, seed, c) {
+  const r = rng(seed + 5), tw = (r() - .5) * 1.1, N = 40, V = [-1, -.45, 0, .45, 1], pos = [], col = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, p = curve.getPointAt(u), t = curve.getTangentAt(u);
+    const sd = new THREE.Vector3().crossVectors(t, UP); if (sd.lengthSq() < 1e-6) sd.set(1, 0, 0); sd.normalize();
+    const nr = new THREE.Vector3().crossVectors(sd, t).normalize(), a = tw * u, s2 = sd.clone().multiplyScalar(Math.cos(a)).addScaledVector(nr, Math.sin(a)), n2 = nr.clone().multiplyScalar(Math.cos(a)).addScaledVector(sd, -Math.sin(a));
+    const w = W * .5 * (.35 + .65 * Math.sin(Math.min(1, u / .14) * Math.PI / 2)) * Math.pow(Math.max(0, 1 - Math.pow(u, 2.4)), .55);
+    for (const v of V) { const q = p.clone().addScaledVector(s2, v * w).addScaledVector(n2, Math.abs(v) * w * .3); pos.push(q.x, q.y, q.z); const sh = .78 + .3 * u; col.push(sh, sh, sh); }
+  }
+  for (let i = 0; i < N; i++) for (let j = 0; j < V.length - 1; j++) { const a = i * V.length + j, b = a + V.length; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, skin(c, { emissive: '#e6f2d6', emissiveIntensity: .06 })); m.userData.noLine = true; return m;
+}
 /* 3 佛焰苞（马蹄莲）：一片苞卷成漏斗，卷一圈多，口斜着开，一侧拉出个尖 */
 const spatheCache = new Map();
 function spatheGeo({ R = .09, H = .2, ruffle = .5, seed = 0 }) {
@@ -465,7 +609,8 @@ function build(st) {
   const g = new THREE.Group(), a = anchorOf(st), d = dirOf(st), len = st.len * vase.Lb * (P ? P.height : 1), tilt = tiltOf(st);
   st.seed = st.seed || (Math.random() * 1000 | 0); const r = rng(st.seed);
   const root = a.clone().add(new THREE.Vector3(0, -vase.depth - .05, 0));   // 从口下面起，像真插在水里
-  const curve = P && P.form === 2 ? archPath(root, a, d, len, tilt, r) : stemPath(root, a, d, len, tilt, r, st.f.filler ? .04 : .075), tip = curve.getPointAt(1), tg = curve.getTangentAt(1);
+  const cym = !!P && Hy.lookOf(st.f) === 'cymbidium'; 
+  const curve = cym ? stemPath(root, a, d.clone().lerp(UP, .55).normalize(), len * .95, tilt * .3, r, .035) : P && P.form === 2 ? archPath(root, a, d, len, tilt, r) : stemPath(root, a, d, len, tilt, r, st.f.filler ? .04 : .075), tip = curve.getPointAt(1), tg = curve.getTangentAt(1);
   const sample = (t) => { const u = curve.tin + t * (1 - curve.tin); return { p: curve.getPointAt(u), tg: curve.getTangentAt(u) }; };   // t 只数口外那段
   if (st.f.filler) {
     g.add(stemMesh(curve, .0045, .0025, st.seed % 2 ? TWIG_C : STEM_C));
@@ -489,6 +634,85 @@ function build(st) {
       hangLeaf(g, leafGeo({ L: .06, W: .03, kind: 'ovate', seed: 7 }), LEAF_C[0], c2.getPointAt(.5), c2.getTangentAt(.5), 1.2, .8, .3);
     }
     for (let i = 0; i < 4; i++) { const t = .35 + i * .12, { p, tg } = sample(t); hangLeaf(g, leafGeo({ L: .065, W: .032, kind: 'ovate', seed: i }), LEAF_C[i % 2], p, tg, i * 2.3, .85 + r() * .3, .3); }
+  } else if (cym) {
+    const grad = Hy.gradOf(st.f) || [Hy.colorsOf(st.f)[0], '#a9c3e0', '#e2e9f4'], G = [grad[0], grad[1], grad[2] || grad[1]], lip = Hy.lipOf(st.f) || '#a48ac2', s0 = P.scale;
+    g.add(stemMesh(curve, .0034, .0022, '#7f9a5c'));
+    const spike = (smp, K, seed2, sc0) => {
+      const n = K + 1;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1), t = .4 + u * .6, { p, tg: tt } = smp(t), bud = i === K, sc = sc0 * (1 - u * .15) * (.95 + r() * .08);
+        const sd = new THREE.Vector3().crossVectors(tt, UP); if (sd.lengthSq() < 1e-6) sd.set(1, 0, 0); sd.normalize().multiplyScalar(i % 2 ? 1 : -1);
+        const Vc = new THREE.Vector3().subVectors(CAM.position, p).setY(0).normalize(), S = sd.clone().multiplyScalar(.75).addScaledVector(Vc, .55).normalize();
+        const L = (bud ? .016 : .024) * sc, e = p.clone().addScaledVector(S, L).add(new THREE.Vector3(0, L * .45, 0));
+        g.add(stemMesh(new THREE.CatmullRomCurve3([p, p.clone().addScaledVector(S, L * .5).add(new THREE.Vector3(0, L * .3, 0)), e]), .0013, .001, '#88a466'));
+        hangLeaf(g, leafGeo({ L: .022, W: .007, kind: 'lance', seed: seed2 + i }), '#a3b787', p, tt, (i % 2 ? 0 : Math.PI) + .4, sc, .6);   /* 小梗下面一片小苞叶 */
+        if (bud) {
+          const b = new THREE.Mesh(new THREE.SphereGeometry(.009 * s0 * sc, 10, 8), mat(lerpHex(G[0], G[1], .3), { emissive: G[0], emissiveIntensity: .1 })); b.scale.set(.8, 1.7, .8);
+          b.position.copy(e).add(new THREE.Vector3(0, .01 * s0 * sc, 0)); b.quaternion.setFromUnitVectors(UP, S.clone().multiplyScalar(.4).add(UP).normalize()); b.userData.lineW = .001; g.add(b); continue;
+        }
+        const fl = cymbidium(G, lip, s0 * sc * .8, seed2 + i * 3), F = S.clone().multiplyScalar(.6).addScaledVector(Vc, .6).add(new THREE.Vector3(0, .02 + (r() - .5) * .12, 0)).normalize();
+        fl.position.copy(e).addScaledVector(S, .004 * s0 * sc); orient(fl, F, new THREE.Vector3((r() - .5) * .3, 1, 0)); g.add(fl);
+      }
+    };
+    spike(sample, 3 + (st.seed % 3), st.seed, 1);
+    if (st.seed % 3 !== 1) {   /* 旁边一根矮一点的花葶 */
+      const d2 = new THREE.Vector3(Math.sin(st.phi + 1.6) * .3, 1, Math.cos(st.phi + 1.6) * .3).normalize(), c2 = bend(a.clone().add(new THREE.Vector3(.004, -.01, .004)), d2, len * .68, .05, r, .03);
+      g.add(stemMesh(c2, .003, .002, '#7f9a5c'));
+      spike((t) => ({ p: c2.getPointAt(t), tg: c2.getTangentAt(t) }), 2 + (st.seed % 2), st.seed + 50, .9);
+    }
+    /* 叶：十二到十五片，往四面拱出去；拱得高的立着，垂得低的越过瓶口垂下去（垂的伸得远一点，别扎进瓶身） */
+    const nL = 12 + (st.seed % 4), LC = ['#5b8a44', '#6a9850', '#4f7f3e', '#719c55'], ph0 = r() * 6.28;
+    for (let i = 0; i < nL; i++) {
+      const az = ph0 + i / nL * Math.PI * 2 + (r() - .5) * .5, h = new THREE.Vector3(Math.cos(az), 0, Math.sin(az)), k = i % 3 === 0 ? 1 + r() * .4 : 1.6 + r() * 1.3;
+      const R = Math.max(k > 2 ? .3 : .14, len * (.5 + r() * .5)), H = len * (.32 + r() * .3), b0 = a.clone().addScaledVector(h, .008).add(new THREE.Vector3(0, -.012, 0));
+      const pts = [0, .12, .3, .5, .7, .85, 1].map((u) => b0.clone().addScaledVector(h, R * u).add(new THREE.Vector3(0, H * (2 * u - k * u * u), 0)));
+      g.add(grassLeaf(new THREE.CatmullRomCurve3(pts, false, 'centripetal', .5), .012 + r() * .006, st.seed + i * 7, LC[i % 4]));
+    }
+  } else if (P.form === 2 && Hy.lookOf(st.f) === 'orchid') {
+    const grad = Hy.gradOf(st.f) || [Hy.colorsOf(st.f)[0], '#efecfc'], sg = st.seed % 2 ? 1 : -1, s0 = P.scale;
+    g.add(stemMesh(curve, .0048, .0026, '#6f8a4e'));
+    const K = 3 + (st.seed % 3), NB = 1 + ((st.seed >> 1) % 2), N = K + NB;
+    for (let i = 0; i < N; i++) {
+      const u = i / (N - 1), t = .3 + u * .68, { p } = sample(t), bud = i >= K, sc = (1 - u * .2) * (.95 + r() * .08);
+      const S = curve.side.clone().multiplyScalar(sg * (i % 2 ? .35 : .85)).addScaledVector(curve.h, .25).normalize();
+      const L = (bud ? .022 : .04) * sc, D = S.clone().multiplyScalar(.7).add(new THREE.Vector3(0, -.75, 0)).normalize(), e = p.clone().addScaledVector(D, L);
+      const ped = new THREE.CatmullRomCurve3([p, p.clone().addScaledVector(S, L * .5).add(new THREE.Vector3(0, -L * .1, 0)), e]);
+      g.add(stemMesh(ped, .0018, .0013, '#7a9455'));
+      if (bud) {
+        const b = new THREE.Mesh(new THREE.SphereGeometry(.013 * s0 * sc, 12, 10), mat(lerpHex(grad[0], grad[1], .35), { emissive: grad[0], emissiveIntensity: .12 })); b.scale.set(1, .9, 1.05); b.position.copy(e).addScaledVector(D, .01 * s0 * sc); b.userData.lineW = .0012; g.add(b); continue;
+      }
+      const fl = orchid(grad[0], grad[1], s0 * sc * .56, st.seed + i * 3, Hy.lipOf(st.f) || '#997cb6');
+      const V = new THREE.Vector3().subVectors(CAM.position, e).setY(0).normalize();
+      const F = V.multiplyScalar(.85).addScaledVector(S, .55).add(new THREE.Vector3(0, -.08 + (r() - .5) * .1, 0)).normalize();
+      fl.position.copy(e).addScaledVector(D, .012 * s0 * sc); orient(fl, F, new THREE.Vector3((r() - .5) * .25, 1, 0)); g.add(fl);
+    }
+    /* 叶：从口上摊出去两三片，又宽又厚，梢头圆，往下垂 */
+    const az = Math.atan2(-curve.h.z, curve.h.x), base = a.clone().add(new THREE.Vector3(0, .012, 0)), nl = 2 + (st.seed % 2);
+    for (let i = 0; i < nl; i++) {
+      const l = hangLeaf(g, leafGeo({ L: .19 - i * .025, W: .1 - i * .008, kind: 'ovate', seed: st.seed + 40 + i }), '#5b8a42', base, UP, az + [1.9, -1.5, 3.4][i] + (r() - .5) * .3, 1, .2);
+      l.rotateY(Math.PI);   /* 翻个面，梢头往下垂（hangLeaf 默认往上卷） */
+      l.material = skin('#5b8a42', { emissive: '#dff0c8', emissiveIntensity: .1 });   /* 带一点亮，像叶面上的蜡 */
+    }
+  } else if (P.form === 2 && Hy.lookOf(st.f) === 'campanula') {
+    const grad = Hy.gradOf(st.f) || [Hy.colorsOf(st.f)[0], '#f1f0fb'], G = [grad[0], grad[1], grad[2] || grad[1]], sg = st.seed % 2 ? 1 : -1;
+    g.add(stemMesh(curve, .0055, .0028, '#6f9450'));
+    const K = 4, s0 = P.scale;
+    for (let i = 0; i <= K; i++) {
+      const u = i / K, t = .3 + u * .68, { p, tg: tt } = sample(t), bud = i === K, sc = (1 - u * .22) * (.95 + r() * .1);
+      const S = curve.side.clone().multiplyScalar(sg).addScaledVector(curve.h, .35 - u * .2).normalize();
+      const L = (bud ? .03 : .05) * sc, e = p.clone().addScaledVector(S, L * .75).add(new THREE.Vector3(0, -L * .35, 0));
+      const ped = new THREE.CatmullRomCurve3([p, p.clone().addScaledVector(S, L * .4).add(new THREE.Vector3(0, L * .15, 0)), e]);
+      g.add(stemMesh(ped, .0019, .0014, '#7f9c55'));
+      hangLeaf(g, leafGeo({ L: .05, W: .012, kind: 'lance', seed: st.seed + i + 20 }), LEAF_C[1], p, tt, (sg > 0 ? 3.6 : .5) + (r() - .5) * .4, .8 * sc, .3);
+      if (bud) {
+        const b = new THREE.Mesh(new THREE.SphereGeometry(.014 * s0, 10, 8), mat(lerpHex(grad[0], grad[1], .25))); b.scale.set(1, 1.9, 1); b.userData.lineW = .0012;
+        const bh = new THREE.Group(); b.position.y = -.022 * s0; bh.add(b); bh.position.copy(e); bh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), S.clone().multiplyScalar(.5).add(new THREE.Vector3(0, -1, 0)).normalize()); g.add(bh); continue;
+      }
+      const bell = campanula(G, s0 * sc, st.seed + i);
+      const mouth = S.clone().multiplyScalar(1.3 + r() * .3).add(new THREE.Vector3(0, -1, 0)).normalize();   /* 点头：口斜着朝外朝下 */
+      bell.position.copy(e); bell.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), mouth); bell.rotateY(r() * 6.28); g.add(bell);
+    }
+    for (let i = 0; i < 4; i++) { const t = .06 + i * .085, { p, tg } = sample(t); hangLeaf(g, leafGeo({ L: .17 - i * .022, W: .026, kind: 'lance', seed: st.seed + i }), LEAF_C[i % 2 ? 1 : 0], p, tg, i * 2.6 + r() * .5, 1, .4); }
   } else if (P.form === 2) {
     /* 垂铃（铃兰那种）：弓着的茎，弧那一段单侧排开一串小铃铛，每个挂在小弯梗上朝下垂，越往梢越小，最末几个是没开的圆苞；
        两片宽叶从基部包上来，跟花茎差不多高 */

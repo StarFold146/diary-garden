@@ -47,7 +47,7 @@ const BAG_SVG = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" str
    c-菜.webp 一筐收下来的菜（菜篮子）、s-菜.webp 菜种子纸包、f-花.webp 花种子纸包（压花画法照 postcard-flora.js）、dish.webp 没小图的菜。
    ITEM_IMGS 是画好了的那些；没画的照旧用上面的小 SVG。园子里配出来的新花没法事先画，背包打开时画一张静态的，存在内存里 —— */
 const IMG_DIR = new URL('./icons/items/', import.meta.url).href;
-const ITEM_IMGS = new Set(['c-bloom', 'c-boltbean', 'c-chestnut', 'c-heartberry', 'c-lanternplant', 'c-velvetgrape', 'c-palettemelon', 'c-persimmon', 'c-pumpkin', 'c-thoughtleaf', 'c-tiderice', 'c-twinpeach', 'dish', 'f-anemone', 'f-blue2', 'f-blue3', 'f-calm', 'f-calm2', 'f-calm3', 'f-coax', 'f-coax2', 'f-coax3', 'f-cosmos', 'f-cross', 'f-cross2', 'f-cross3', 'f-daisy', 'f-down', 'f-down2', 'f-down3', 'f-fox', 'f-happy', 'f-happy2', 'f-happy3', 'f-hyd', 'f-lanlan', 'f-lav', 'f-mari', 'f-messy', 'f-messy2', 'f-messy3', 'f-peony', 'f-plum', 'f-rose', 'f-sweet', 'f-sweet2', 'f-sweet3', 'f-thyme', 'f-tired2', 'f-tired3', 'f-tulip', 'f-weiwei', 'f-yarrow', 's-bloom', 's-boltbean', 's-chestnut', 's-heartberry', 's-lanternplant', 's-velvetgrape', 's-palettemelon', 's-persimmon', 's-pumpkin', 's-thoughtleaf', 's-tiderice', 's-twinpeach']);
+const ITEM_IMGS = new Set(['c-bloom', 'c-boltbean', 'c-chestnut', 'c-heartberry', 'c-lanternplant', 'c-velvetgrape', 'c-palettemelon', 'c-persimmon', 'c-pumpkin', 'c-thoughtleaf', 'c-tiderice', 'c-twinpeach', 'dish', 'f-anemone', 'f-blue2', 'f-blue3', 'f-calm', 'f-calm2', 'f-calm3', 'f-coax', 'f-coax2', 'f-coax3', 'f-cosmos', 'f-cross', 'f-cross2', 'f-cross3', 'f-daisy', 'f-down', 'f-down2', 'f-down3', 'f-fox', 'f-happy', 'f-happy2', 'f-happy3', 'f-hyd', 'f-lanlan', 'f-lav', 'f-mari', 'f-messy', 'f-messy2', 'f-messy3', 'f-peony', 'f-plum', 'f-rose', 'f-sweet', 'f-sweet2', 'f-sweet3', 'f-thyme', 'f-tired2', 'f-tired3', 'f-tulip', 'f-weiwei', 'f-yarrow', 'f-yinghui', 'f-yinglan', 'f-yingyan', 's-bloom', 's-boltbean', 's-chestnut', 's-heartberry', 's-lanternplant', 's-velvetgrape', 's-palettemelon', 's-persimmon', 's-pumpkin', 's-thoughtleaf', 's-tiderice', 's-twinpeach']);
 const imgOf = (name) => ITEM_IMGS.has(name) ? IMG_DIR + name + '.webp' : null;
 /* 纸包：奶油色纸，顶上一道锯齿封口，底下一条菜/花颜色的腰封，中间贴图。构建小图和新花现画都用这一个 */
 export function packet(img, tint, S = 96) {
@@ -268,7 +268,7 @@ function build() {
 /* —— 兑换：口令换礼物花种子，每兑一次给十粒，不限次数，diarytown_redeemed 只记最后一次兑的时间。代码里只放口令的 SHA-256（去空白和标点、NFC 以后），
    花名和颜色都从 hybrid.js 的 SPECIES 现读 —— */
 const GIFT_SEEDS = 10;
-const CODES = { b4a693fc94ee3ced16edfbe1e1bf3d0cc60240fb8468cba655899231d31aa215: 'weiwei', fda2a481a59a17ea479479667d817547a282f53ee7d943e053c8abf12e7f0937: 'lanlan' };
+const CODES = { b4a693fc94ee3ced16edfbe1e1bf3d0cc60240fb8468cba655899231d31aa215: 'weiwei', fda2a481a59a17ea479479667d817547a282f53ee7d943e053c8abf12e7f0937: 'lanlan', '27471e5a5770e4c3cd919fda1fd3c4d6596154f8559ec7f65456195a8d61d3a9': 'yingyan' };
 const norm = (t) => String(t || '').normalize('NFC').replace(/[\s\p{P}]/gu, '');
 async function sha(t) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 function say(t, bad) {

@@ -49,12 +49,26 @@
 .kbar .back{padding:6px 12px}
 .kbar .hpbtn{width:32px;height:32px;border-radius:16px;font-size:12px}
 .rcbtn{left:16px;top:calc(env(safe-area-inset-top) + 12px);padding:6px 14px}
+/* 挑菜：一样菜一块小牌子，跟心情按钮一个样子，选上是砖红 */
+#s1{overflow-y:auto;justify-content:safe center;padding-top:calc(env(safe-area-inset-top) + 64px)}
+.picks{display:grid;grid-template-columns:repeat(3,1fr);gap:12px 10px;width:min(100%,330px)}
+.picks button{position:relative;display:flex;flex-direction:column;align-items:center;padding:8px 4px 6px;border-radius:16px;background:var(--card);box-shadow:0 4px 14px -8px rgba(80,50,40,.35),0 0 0 .5px rgba(90,60,50,.12);transition:transform .15s ease,background .2s,color .2s}
+.picks button:nth-child(odd){transform:rotate(-1.5deg)}.picks button:nth-child(2n){transform:rotate(1.5deg)}
+.picks img{width:46px;height:46px;object-fit:contain}
+.picks span{font-size:13px;line-height:1.4;margin-top:2px}
+.picks small{font-size:10px;color:var(--soft);letter-spacing:.1em}
+.picks i{position:absolute;right:6px;top:4px;font-style:normal;font-size:9px;letter-spacing:.1em;color:var(--brick)}
+.picks button.on{background:var(--brick);color:#fbf7ef}
+.picks button.on small,.picks button.on i{color:rgba(251,247,239,.8)}
+.picks button.on img{filter:drop-shadow(0 0 3px rgba(255,250,240,.7))}
+.picks.full{animation:nope .35s}
 </style></head><body>
 <button class="rcbtn" id="rcBtn">菜 谱</button>
 <div class="rcsheet" id="rcSheet" hidden><button class="x" id="rcClose">×</button><h3>菜 谱</h3><p class="sub2">端上桌过的菜都在这儿 · 按菜篮子够做几份</p><div id="rcList"></div></div>
 <div class="kbar"><button id="bagBtn" aria-label="背包"></button><button class="hpbtn" id="hpBtn" aria-label="怎么玩">？</button><a class="back" href="shop.html">回店里</a></div>
 <div class="rcsheet help" id="hpSheet" hidden><button class="x" id="hpClose">×</button><h3>厨 房 怎 么 玩</h3><p class="sub2">几句话，看完就会</p>
 <p>菜篮子里的菜有两个来处。<mark class="hl">今天第一篇日记写了什么心情</mark>，那样菜就<mark class="hl">给两份</mark>，别的去田里种。</p>
+<p>进厨房先<mark class="hl">挑这一锅用什么菜</mark>，最多六样。今天心情的那几样已经替你勾上了，不想要就点掉。</p>
 <p>端上桌的时候，盘里用到的<mark class="hl">每样菜扣一份</mark>。摆了三块心跳莓，也只扣一份心跳莓。</p>
 <p>头一回端上桌的菜会<mark class="hl">记进菜谱</mark>。下次在菜谱里点<mark class="hl">「出盘」</mark>，直接做好，不用再摆一遍。</p>
 <p>一盘里每样菜各用一份，所以能做几盘<mark class="hl">看最少的那样</mark>。五个南瓜两个栗子，只能做两盘。</p>
@@ -62,7 +76,8 @@
 <p>有几样菜凑在一起会变成<mark class="hl">隐藏菜，多卖 20</mark>。比如心跳莓配双生桃，做法选原样，就是双心莓桃派。</p>
 <p>做好的菜<mark class="hl">先放在后厨</mark>，回店里<mark class="hl">补货摆进柜子</mark>，才有人买。</p>
 </div>
-<section class="scr on" id="s2"> <p class="ld" id="ld">生 火 中</p> <div class="bar"><i id="barI"></i></div> <p class="tip" id="tip">把心情洗一洗，切一切</p> <p class="credit">这间厨房拆自记忆小镇 <b>暮园 · Hesperides</b></p> </section>
+<section class="scr on" id="s1"> <h2>今 天 用 什 么</h2> <p class="sub">点一下选上 · 再点放回去</p> <div class="picks" id="picks"></div> <p class="cnt" id="pkCnt">翻菜篮子……</p> <button class="go" id="fireBtn" disabled>生 火</button> </section>
+<section class="scr" id="s2"> <p class="ld" id="ld">生 火 中</p> <div class="bar"><i id="barI"></i></div> <p class="tip" id="tip">把心情洗一洗，切一切</p> <p class="credit">这间厨房拆自记忆小镇 <b>暮园 · Hesperides</b></p> </section>
 <section class="scr" id="s3"> <canvas id="cv"></canvas> <div class="dish" id="dish"></div> <div class="panel"> <h3>点一下拿一块 · 拖着摆 · 轻点转一转 · 拖出盘外扔掉</h3><div class="chips" id="pieces"></div> <h3 style="margin-top:8px">做法</h3><div class="chips" id="forms"></div> <div class="prow"><button id="clear">清空</button><button id="serve" class="main">端上桌</button></div> </div> </section>
 <section class="scr" id="s4"> <div class="card" id="card"></div> <button class="again" id="again">再 来 一 盘</button> </section>
 <div class="toast" id="toast"></div>

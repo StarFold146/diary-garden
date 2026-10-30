@@ -9,6 +9,7 @@ import * as K from './town/food.js';
 import { SPECIES, dishOf, useSpecies } from './town/mem.js';
 import * as Day from './day.js';   /* 一天开一次店、结一次账、补一次货；种子铺 */
 import './bag.js';   /* 背包 */
+import * as AU from './autumn.js';   /* 秋天三样的小件和盛器，柜子里也照厨房那样摆 */
 useSpecies(Day.seasonSpecs());   /* 应季菜（南瓜、栗子、柿子）登记进小镇的菜谱，后厨端出来的应季菜柜子里才摆得出来 */
 
 const $ = (s) => document.querySelector(s);
@@ -241,11 +242,13 @@ function newDish(sd) {
 function dishMesh(dsh) {
   if (dsh.tea) { const tg = teaMesh(dsh); outline(tg, { w: .006 }); shadowAll(tg); return fitDish(tg, dsh.tea === 'stand' ? .3 : .22); }
   const g = new THREE.Group(); seed = dsh.seed;
-  const v = Day.tintVessel(K.vessel(Day.seasonVessel(dsh.keys[0]), dsh.form), dsh.keys[0], dsh.form); g.add(v);
+  /* 应季隐藏菜按菜名认（盘里可能只摆了其中一样），别的按盘里的菜 */
+  const sk = dsh.special && Object.keys(Day.SEASON_SPECIAL).find((s) => Day.SEASON_SPECIAL[s][0] === dsh.name);
+  const v = AU.vessel(sk ? sk.split('+') : dsh.keys, dsh.form, dsh.seed) || Day.tintVessel(K.vessel(Day.seasonVessel(dsh.keys[0]), dsh.form), dsh.keys[0], dsh.form); g.add(v);
   const catches = []; v.traverse((o) => { if (o.userData && o.userData.catch) catches.push(o); });
   const list = dsh.keys.flatMap((k) => [k, k, k]).concat(K.EXTRA[dsh.form] || []);
   list.forEach((k, i) => {
-    const c = catches[i % catches.length], u = c.userData, p = K.piece(k, dsh.seed + i);
+    const c = catches[i % catches.length], u = c.userData, p = AU.piece(k, dsh.seed + i) || K.piece(k, dsh.seed + i);
     let x = c.position.x, z = c.position.z;
     if (u.disc) { const a = rnd() * 6.28, r = Math.sqrt(rnd()) * u.disc * .65; x += Math.cos(a) * r; z += Math.sin(a) * r; }
     else { x += (rnd() - .5) * u.rect[0] * .7; z += (rnd() - .5) * u.rect[1] * .7; }

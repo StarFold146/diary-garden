@@ -181,9 +181,169 @@ function plumbago(cs, seed, s = 1, P = null) {
 }
 
 
+/* 风铃草的铃：形照插花台 ikebana.js 的 campGeo，
+   颜色直接写进顶点，挂点在上、口朝下，五个圆裂片梢头微微外翻。「蓝紫色双色不明显」：G = [紫, 天蓝, 边]，
+   铃根和五条脉是紫，中段一道过渡带换成天蓝，裂片边再浅一点（跟插花台 campPaint 一个规矩） */
+function campGeo(R, H, G, seed) {
+  const ph = rng(seed + 11)() * 6.28, [V, B, E] = G.map((x) => new THREE.Color(x)), c = new THREE.Color();
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const g = surf(14, 36, (u, v) => {
+    const a = (v + 1) / 2 * Math.PI * 2, lobe = Math.pow((1 + Math.cos(a * 5 + ph)) / 2, .6), lip = Math.max(0, u - .6) / .4;
+    let rad = R * (.2 + .8 * Math.pow(Math.sin(Math.min(1, u / .88) * Math.PI / 2), 1.15));
+    rad += R * .38 * lip * lip * (.3 + .7 * lobe);
+    const y = -H * (u - .22 * lip * lip * (1 - lobe)) + H * .1 * Math.pow(lip, 3) * lobe;
+    return [Math.cos(a) * rad, y, Math.sin(a) * rad, 1];
+  });
+  const uv = g.getAttribute('uv'), col = g.getAttribute('color');
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), cl = (1 + Math.cos(uv.getY(i) * Math.PI * 2 * 5 + ph)) / 2;
+    c.copy(V).lerp(B, ss(.38, .62, u)); c.lerp(V, .75 * Math.pow(cl, 22) * (1 - ss(.6, .97, u))); c.lerp(E, .55 * ss(.86, 1, u) * (.4 + .6 * Math.pow(cl, .6)));
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  return g;
+}
+function campanulaStem(f, root, d, len, tilt, seed) {
+  const grad = Hy.gradOf(f) || [Hy.colorsOf(f)[0], '#f1f0fb'], G = [grad[0], grad[1], grad[2] || grad[1]], r = rng(seed), g = new THREE.Group();
+  const d2 = d.clone().add(new THREE.Vector3(-.16, 0, 0)).normalize();   /* 茎往左偏一点，弧再往右弯回来，整枝落在正中 */
+  const curve = bend(root, d2, len, tilt, r, .04), sample = (t) => ({ p: curve.getPointAt(t), tg: curve.getTangentAt(t) });
+  g.add(stemMesh(curve, .0042, .0024));
+  for (let i = 0; i < 3; i++) { const { p, tg } = sample(.14 + i * .12); hangLeaf(g, leafGeo({ L: .17 - i * .03, W: .026, kind: 'lance', seed: seed + i }), LEAF_C[i % 2], p, tg, i % 2 ? Math.PI : 0, 1, .4); }
+  /* 弧顶往一侧弯下去，单侧挂三朵铃、梢头一个长苞 */
+  const top = curve.getPointAt(1), arc = new THREE.CatmullRomCurve3([top.clone().add(new THREE.Vector3(0, -.12, 0)), top, top.clone().add(new THREE.Vector3(.08, .05, 0)), top.clone().add(new THREE.Vector3(.17, .02, 0)), top.clone().add(new THREE.Vector3(.23, -.07, 0))]);
+  g.add(stemMesh(arc, .0032, .0022));
+  for (let i = 0; i < 4; i++) {
+    const t = .25 + i * .25, p = arc.getPointAt(Math.min(1, t)), bud = i === 3, e = p.clone().add(new THREE.Vector3(.012, -.03, 0));
+    g.add(stemMesh(new THREE.CatmullRomCurve3([p, p.clone().add(new THREE.Vector3(.012, -.006, 0)), e]), .0016, .0012));
+    if (bud) { const b = new THREE.Mesh(new THREE.SphereGeometry(.016, 10, 8), mat(grad[0])); b.scale.set(1, 1.8, 1); b.position.copy(e).add(new THREE.Vector3(.004, -.024, 0)); g.add(b); continue; }
+    const sc = BIG * .95 * (1 - i * .08), m = new THREE.Mesh(campGeo(.04 * sc, .074 * sc, G, seed + i), mat('#ffffff', { vertexColors: true, opacity: .92 }));
+    m.position.copy(e); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), new THREE.Vector3(.45, -1, .55).normalize()); g.add(m);
+  }
+  g.userData.tip = arc.getPointAt(.5); g.userData.tape = curve.getPointAt(.26); g.userData.tapeTg = curve.getTangentAt(.26);
+  return g;
+}
+/* 兰花：压平了正对着看。
+   一片瓣：形照 petalGeo，颜色写进顶点（瓣是蓝的，瓣根一截紫，唇瓣浓紫） */
+function gradPetal(o, c0, c1, pw, lip = null) {
+  const g = petalGeo({ notch: 0, ...o, key: 'o' }).clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), A = new THREE.Color(c0), B = new THREE.Color(c1), L = lip && new THREE.Color(lip), c = new THREE.Color();
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i);
+    if (L) { if (u < .38) c.copy(L).lerp(A, Math.pow(Math.max(0, u - .08) / .3, 1.3)); else c.copy(A).lerp(B, Math.pow((u - .38) / .62, 1.4)); }   /* 瓣根一截紫，往外是蓝，瓣缘只浅一点 */
+    else c.copy(A).lerp(B, Math.pow(u, pw));
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  return g;
+}
+/* 一朵：背萼朝上，两片圆圆的宽花瓣在两边，两片侧萼往下撇，正下方唇瓣深一号，喉口一点淡黄，中间白蕊柱 */
+/* 蓝紫饱和度有点高。唇瓣的紫和往深、往浅调的两头都褪成雾紫，不再压一块浓紫 */
+function orchidHead(c0, c1, s, seed, lip = '#997cb6') {
+  const g = new THREE.Group(), r = rng(seed), lipA = '#' + new THREE.Color(lip).lerp(new THREE.Color('#6e558b'), .2).getHexString(), lipB = '#' + new THREE.Color(lip).lerp(new THREE.Color('#cbbcdc'), .35).getHexString();
+  const piece = (o, a, ca, cb, pw, z = 0) => { const m = new THREE.Mesh(gradPetal({ ...o, seed: seed * 5 + o.seed }, ca, cb, pw, ca === c0 ? lip : null), mat('#ffffff', { vertexColors: true, opacity: .94 })); m.rotation.z = a + (r() - .5) * .06; m.position.z = z * s; m.scale.setScalar(s); g.add(m); };
+  piece({ L: .078, Wd: .066, cup: .3, reflex: .1, ruffle: .05, seed: 1 }, 0, c0, c1, 1.1);
+  for (const k of [-1, 1]) piece({ L: .074, Wd: .062, cup: .3, reflex: .1, ruffle: .05, seed: 2 + (k > 0) }, k * 2.45, c0, c1, 1.1);
+  for (const k of [-1, 1]) piece({ L: .082, Wd: .11, cup: .25, reflex: .1, ruffle: .08, seed: 4 + (k > 0) }, k * 1.3, c0, c1, 1.25, .004);
+  for (const k of [-1, 1]) piece({ L: .03, Wd: .028, cup: .8, reflex: .1, ruffle: 0, seed: 8 }, Math.PI + k * .75, lipA, lipB, .8, .008);
+  piece({ L: .05, Wd: .046, cup: 1, reflex: .2, ruffle: .1, seed: 7 }, Math.PI, lipA, lipB, .9, .012);
+  const dot = (c, rx, ry, x, y, z) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), mat(c)); m.scale.set(rx * s, ry * s, .002); m.position.set(x * s, y * s, z * s); g.add(m); };
+  dot('#f3d97c', .009, .006, 0, -.008, .016);   /* 喉口淡黄 */
+  dot('#fbf6e6', .006, .003, 0, -.015, .017);
+  dot('#f8f6fc', .005, .007, 0, .004, .018);    /* 蕊柱 */
+  return g;
+}
+function orchidStem(f, root, d, len, tilt, seed) {
+  const grad = Hy.gradOf(f) || [Hy.colorsOf(f)[0], '#efecfc'], r = rng(seed), g = new THREE.Group();
+  const d2 = d.clone().add(new THREE.Vector3(-.2, 0, 0)).normalize();   /* 花葶往左偏，弧再往右弯回来，整枝落在正中 */
+  const curve = bend(root, d2, len, tilt, r, .03);
+  g.add(stemMesh(curve, .004, .0024, '#86b862'));
+  /* 基部两片宽叶往两边摊开 */
+  for (const [ang, L] of [[1.25, .2], [-1.35, .17]]) { hangLeaf(g, leafGeo({ L, W: .085, kind: 'ovate', seed: seed + (ang > 0 ? 3 : 4) }), '#7fbf68', root.clone().add(new THREE.Vector3(0, .01, 0)), UP, ang > 0 ? .25 : Math.PI - .25, 1, .2); }
+  const top = curve.getPointAt(1), arc = new THREE.CatmullRomCurve3([top.clone().add(new THREE.Vector3(0, -.12, 0)), top, top.clone().add(new THREE.Vector3(.1, .05, 0)), top.clone().add(new THREE.Vector3(.22, .03, 0)), top.clone().add(new THREE.Vector3(.33, -.06, 0))]);
+  g.add(stemMesh(arc, .003, .002, '#86b862'));
+  const T = [.2, .44, .66, .84, .97];
+  T.forEach((t, i) => {
+    const p = arc.getPointAt(t), bud = i >= 3, e = p.clone().add(new THREE.Vector3(.008, bud ? -.018 : -.03, 0));
+    g.add(stemMesh(new THREE.CatmullRomCurve3([p, p.clone().add(new THREE.Vector3(.008, -.008, 0)), e]), .0015, .0011, '#86b862'));
+    if (bud) { const b = new THREE.Mesh(new THREE.SphereGeometry(.014 * (i === 3 ? 1 : .75), 12, 10), mat('#' + new THREE.Color(grad[0]).lerp(new THREE.Color(grad[1]), .35).getHexString())); b.position.copy(e).add(new THREE.Vector3(0, -.01, .01)); g.add(b); return; }
+    const h = orchidHead(grad[0], grad[1], BIG * .62 * (1 - i * .07), seed + i, Hy.lipOf(f) || '#997cb6'); h.position.copy(e).add(new THREE.Vector3(0, -.05 * (1 - i * .07), .02 + i * .004)); h.rotation.z = (r() - .5) * .2; g.add(h);
+  });
+  g.userData.tip = arc.getPointAt(.44); g.userData.tape = curve.getPointAt(.3); g.userData.tapeTg = curve.getTangentAt(.3);
+  return g;
+}
+/* 国兰：压平了正对着看。一丛细长的叶往两边拱出去再垂下来，
+   中间一根细花葶直直站着、旁边一根矮的，花一朵朵左右错开；三片窄萼摊成星，两片小花瓣兜着蕊柱，唇瓣奶白带几点淡斑 */
+const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function cymPetal(o, G) {
+  const g = petalGeo({ notch: 0, ruffle: 0, ...o, key: 'c' }).clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), [A, B, E] = G.map((c) => new THREE.Color(c)), c = new THREE.Color();
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i) * 2 - 1;
+    c.copy(A).lerp(B, sm(.3, .82, u)); c.lerp(E, .55 * sm(.82, 1, u)); c.lerp(A, .4 * Math.exp(-Math.pow(v / .18, 2)) * (1 - sm(.55, .95, u)));   /* 瓣根雾紫过到粉蓝，中脉一道淡紫 */
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  return g;
+}
+function cymLipPetal(o, lip) {
+  const g = petalGeo({ notch: 0, ...o, key: 'c' }).clone(), uv = g.getAttribute('uv'), col = g.getAttribute('color'), S = new THREE.Color(lip), W = new THREE.Color('#f7f3f4'), c = new THREE.Color();
+  const spots = [[.34, 0], [.44, -.42], [.44, .42], [.6, -.18], [.6, .22], [.74, -.46], [.76, .4]];
+  for (let i = 0; i < col.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i) * 2 - 1; let sp = 0;
+    for (const [su, sv] of spots) sp = Math.max(sp, Math.exp(-Math.pow((u - su) / .07, 2) - Math.pow((v - sv) / .17, 2)));
+    c.copy(W).lerp(S, .4 * (1 - sm(.05, .3, u))).lerp(S, .8 * sp); col.setXYZ(i, c.r, c.g, c.b);
+  }
+  return g;
+}
+function cymHead(G, lip, s, seed) {
+  const g = new THREE.Group(), r = rng(seed);
+  const piece = (geo, a, z = 0) => { const m = new THREE.Mesh(geo, mat('#ffffff', { vertexColors: true, opacity: .94 })); m.rotation.z = a + (r() - .5) * .08; m.position.z = z * s; m.scale.setScalar(s); g.add(m); };
+  piece(cymPetal({ L: .078, Wd: .028, cup: .3, reflex: .1, seed: 1 }, G), 0);
+  for (const k of [-1, 1]) piece(cymPetal({ L: .074, Wd: .027, cup: .3, reflex: .1, seed: 2 + (k > 0) }, G), k * 2.05);
+  for (const k of [-1, 1]) piece(cymPetal({ L: .04, Wd: .026, cup: .6, reflex: .05, seed: 5 }, G), k * .5, .006);
+  piece(cymLipPetal({ L: .036, Wd: .034, cup: .5, reflex: .3, ruffle: .1, seed: 7 }, lip), Math.PI, .01);
+  const colm = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), mat('#f6f2fa')); colm.scale.set(.004 * s, .008 * s, .002); colm.position.set(0, .006 * s, .014 * s); g.add(colm);   /* 蕊柱 */
+  return g;
+}
+function grassRibbon(curve, W, c) {
+  const N = 40, V = [-1, 0, 1], pos = [], col = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, p = curve.getPointAt(u), t = curve.getTangentAt(u), sd = new THREE.Vector3().crossVectors(t, PRESS).normalize();
+    const w = W * .5 * (.35 + .65 * Math.sin(Math.min(1, u / .14) * Math.PI / 2)) * Math.pow(Math.max(0, 1 - Math.pow(u, 2.4)), .55);
+    for (const v of V) { const q = p.clone().addScaledVector(sd, v * w); pos.push(q.x, q.y, q.z); const sh = .82 + .22 * u; col.push(sh, sh, sh); }
+  }
+  for (let i = 0; i < N; i++) for (let j = 0; j < 2; j++) { const a = i * 3 + j, b = a + 3; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx);
+  return new THREE.Mesh(geo, skin(c));
+}
+function cymbidiumStem(f, root, d, len, tilt, seed) {
+  const grad = Hy.gradOf(f) || [Hy.colorsOf(f)[0], '#a9c3e0', '#e2e9f4'], G = [grad[0], grad[1], grad[2] || grad[1]], lip = Hy.lipOf(f) || '#a48ac2', r = rng(seed), g = new THREE.Group();
+  const curve = bend(root, d, len, tilt, r, .025);
+  g.add(stemMesh(curve, .0028, .0018, '#86b862'));
+  const spike = (cv, K, sd0, sc0) => {
+    for (let i = 0; i <= K; i++) {
+      const t = .42 + i / K * .58, p = cv.getPointAt(t), tg = cv.getTangentAt(t), sg = (i + sd0) % 2 ? 1 : -1, side = new THREE.Vector3().crossVectors(tg, PRESS).normalize().multiplyScalar(sg), bud = i === K, sc = sc0 * (1 - i / K * .15);
+      const e = p.clone().addScaledVector(side, (bud ? .01 : .018) * sc).add(new THREE.Vector3(0, .008 * sc, 0));
+      g.add(stemMesh(new THREE.CatmullRomCurve3([p, p.clone().addScaledVector(side, .008 * sc).add(new THREE.Vector3(0, .005 * sc, 0)), e]), .0012, .0009, '#86b862'));
+      if (bud) { const b = new THREE.Mesh(new THREE.SphereGeometry(.009 * sc, 10, 8), mat('#' + new THREE.Color(G[0]).lerp(new THREE.Color(G[1]), .3).getHexString())); b.scale.set(.75, 1.6, .5); b.position.copy(e).add(new THREE.Vector3(0, .008 * sc, .01)); g.add(b); continue; }
+      const h = cymHead(G, lip, BIG * .66 * sc, seed + i * 3 + sd0 * 11); h.position.copy(e).addScaledVector(side, .02 * sc).add(new THREE.Vector3(0, 0, .02 + i * .003)); h.rotation.z = -sg * .3 + (r() - .5) * .15; g.add(h);
+    }
+  };
+  spike(curve, 4, 0, 1);
+  const d2 = d.clone().add(new THREE.Vector3(.22, 0, 0)).normalize(), c2 = bend(root.clone().add(new THREE.Vector3(.004, 0, -.004)), d2, len * .66, tilt, r, .02);
+  g.add(stemMesh(c2, .0024, .0016, '#86b862')); spike(c2, 3, 1, .9);
+  /* 叶：七片，往左右拱出去，高的立着，低的垂下来，梢头慢慢收细 */
+  const LC = ['#7fbf68', '#8ccb72', '#72b05e'];
+  for (let i = 0; i < 7; i++) {
+    const sg = i % 2 ? 1 : -1, k = i < 2 ? 1 + r() * .3 : 1.7 + r() * 1, R = len * (.32 + r() * .3), H = len * (.26 + r() * .22), b0 = root.clone().add(new THREE.Vector3(0, .01, -.01 - i * .001));
+    const pts = [0, .12, .3, .5, .7, .85, 1].map((u) => b0.clone().add(new THREE.Vector3(sg * R * u, H * (2 * u - k * u * u), 0)));
+    g.add(grassRibbon(new THREE.CatmullRomCurve3(pts, false, 'centripetal', .5), .016 + r() * .006, LC[i % 3]));
+  }
+  g.userData.tip = curve.getPointAt(.8); g.userData.tape = curve.getPointAt(.22); g.userData.tapeTg = curve.getTangentAt(.22);
+  return g;
+}
+
 // ---------- 一枝花（没有花器）：从 root 往 d 方向长 len，整株在 XY 平面里，花脸朝镜头 ----------
 const BIG = 1.45; 
 function stemOf(f, root, d, len, tilt, seed) {
+  if (Hy.lookOf(f) === 'campanula') return campanulaStem(f, root, d, len * Hy.paramsOf(Hy.genesOf(f)).height, tilt, seed); 
+  if (Hy.lookOf(f) === 'orchid') return orchidStem(f, root, d, len * Hy.paramsOf(Hy.genesOf(f)).height, tilt, seed); 
+  if (Hy.lookOf(f) === 'cymbidium') return cymbidiumStem(f, root, d, len * Hy.paramsOf(Hy.genesOf(f)).height, tilt, seed); 
   const P = Hy.paramsOf(Hy.genesOf(f)), cs = Hy.colorsOf(f).map(pastel), r = rng(seed), g = new THREE.Group(), face = PRESS.clone().multiplyScalar(3);
   len *= P.height;
   const curve = bend(root, d, len, tilt, r, .04), tip = curve.getPointAt(1), tg = curve.getTangentAt(1);
