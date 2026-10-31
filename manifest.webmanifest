@@ -4,7 +4,7 @@
   "short_name": "日记花园",
   "description": "一座记日记的小花园",
   "lang": "zh",
-  "start_url": "./?home",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f6efe3",
