@@ -178,12 +178,24 @@ export function cross(a, b, R = Math.random) {
    只去掉结尾那一个后缀字（花兰莲铃球菊草盏团雾晃合），中间的不动：晴铃花→晴铃、垂雨铃→垂雨、毛线球→毛线；两字相同的组合不要。
    突变出爸妈都没有的骨架时，后头带上那骨架的字（铃怦 + 碎雾 → 铃怦雾），一眼看出它换了样子 —— */
 const stem = (n) => { const a = [...(n || '花')]; return a.length > 1 && /[花兰莲铃球菊草盏团雾晃合]/.test(a[a.length - 1]) ? a.slice(0, -1) : a; };
+/* 1.3.6：玩家改的名字可能带括号备注、标点、字母（「澄水莲（紫色）」长出过一朵「澄）」）—— 括号里的整段去掉，只留汉字；
+   「后滴的了着」这种单拎出来不成话的字往后排；两字相同的、撞了底花名字（炸毛菊→「炸毛」）的都不要，也不再编号出「奶奶2」 */
+const clean = (n) => { const t = String(n || '').replace(/[（(【\[][^）)】\]]*[）)】\]]?/g, '').replace(/[^\u4e00-\u9fff]/g, ''); return t || '花'; };
+const AWK = /[后滴的了着之]/;
+const order = (a, fromEnd) => { const xs = fromEnd ? [...a].reverse() : [...a]; return xs.filter((c) => !AWK.test(c)).concat(xs.filter((c) => AWK.test(c))); };
 export function autoName(na, nb, taken = [], suf = '') {
-  const A = stem(na), B = stem(nb);
-  const tries = [A[A.length - 1] + B[0], A[0] + B[B.length - 1], B[B.length - 1] + A[0], B[0] + A[A.length - 1]].map((t) => suf && !t.includes(suf) ? t + suf : t);
-  for (const t of tries) if (t[0] !== t[1] && !taken.includes(t)) return t;
-  let n = 2; while (taken.includes(tries[0] + n)) n++;
-  return tries[0] + n;
+  const A = stem(clean(na)), B = stem(clean(nb));
+  const baseStems = Object.values(SPECIES).map((s) => stem(s.zh).join(''));
+  const pairs = [];
+  for (const a of order(A, true)) for (const b of order(B, false)) pairs.push(a + b);
+  for (const b of order(B, true)) for (const a of order(A, false)) pairs.push(b + a);
+  const awk = (t) => [...t].filter((c) => AWK.test(c)).length; pairs.sort((x, y) => awk(x) - awk(y));   /* 稳定排序：带怪字的整体往后 */
+  const ok = (t) => t[0] !== t[1] && !taken.includes(t) && !baseStems.includes(t);
+  for (let t of pairs) { if (suf && !t.includes(suf)) t += suf; if (ok(t)) return t; }
+  /* 全撞了（极少）：换个能凑的底花字，实在不行才编号，但不出叠字 */
+  const first = pairs.find((t) => t[0] !== t[1]) || (A[0] + '花');
+  let n = 2; while (taken.includes(first + n)) n++;
+  return first + n;
 }
 
 /* —— 两盆挨着过一夜 → 新花 + 一株苗 ——
