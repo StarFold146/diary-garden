@@ -423,18 +423,25 @@ R.domElement.addEventListener('pointerup', (e) => {
   closeAll();
   if (!h) return;
   const u = h.object.userData;
-  if (u.slot !== undefined) showDish(STATE[u.slot]);
+  if (u.slot !== undefined) showDish(STATE[u.slot], u.slot);
   else if (u.card) showCard(u.card, u.url);
   else if (u.mail) showNote();
   else if (u.kitchen) location.href = 'kitchen.html';
 });
 function closeAll() { document.querySelectorAll('.sheet').forEach((s) => { s.hidden = true; }); }
 document.querySelectorAll('[data-close]').forEach((b) => b.onclick = () => { b.parentElement.hidden = true; });
-function showDish(d) {
+function showDish(d, slot) {
   if (!d) return;
   $('#dName').textContent = d.name;
   $('#dMeta').textContent = d.tea ? `${d.price} 花币 · 下午茶` : `${d.price} 花币 · 用了 ${d.keys.map((k) => SPECIES[k]?.zh || k).join('、')}${d.form === 'cake' ? ' · 做成蛋糕' : ''}`;
   $('#dAbout').textContent = d.about || ''; $('#dish').hidden = false;
+  /* 摆久了自己撤：撤下回后厨那摞盘子，倒掉就没了（点两下才倒）。打过烊也能撤 */
+  const days = d.on ? Math.floor((Date.now() - d.on) / 864e5) : -1;
+  $('#dAge').textContent = days < 0 ? '' : days === 0 ? '今天摆上的' : `摆了 ${days} 天`;
+  const back = $('#dBack'), toss = $('#dToss'), off = () => { STATE[slot] = null; saveState(); renderCase(); dayBar(); $('#dish').hidden = true; };
+  back.hidden = !d.plate; toss.textContent = '倒 掉'; toss.classList.remove('warn');
+  back.onclick = () => { const l = bag(); l.push(d.plate); saveBag(l); off(); };
+  toss.onclick = () => { if (!toss.classList.contains('warn')) { toss.textContent = '真 倒 掉？'; toss.classList.add('warn'); return; } off(); };
 }
 function showCard(f, url) { $('#pcImg').src = url; const d = new Date(f.at); $('#pcMeta').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日 · 从花园寄回来的`; $('#pcBig').hidden = false; }
 let lastNote = -1;
@@ -469,7 +476,7 @@ const saveBag = (l) => { try { localStorage.setItem('diarytown_dishes', JSON.str
 function plateToCase(pl) {
   const keys = (pl.species || []).filter((k) => SPECIES[k]).slice(0, 3); if (!keys.length) keys.push('tiderice');
   const form = pl.form || 'plain';
-  return { keys, form, seed: Math.floor(pl.at % 9973), name: pl.name, about: pl.about, special: !!pl.special, price: priceOf(keys, pl.special, form), plate: pl };
+  return { keys, form, seed: Math.floor(pl.at % 9973), name: pl.name, about: pl.about, special: !!pl.special, price: priceOf(keys, pl.special, form), plate: pl, on: Date.now() };
 }
 let pickAt = -1;
 function renderStock() {
@@ -529,7 +536,7 @@ function dayBar() {
   const shut = Day.done('settle'), empty = !STATE.some(Boolean);
   $('#close').disabled = shut || empty; $('#close').textContent = shut ? '今 天 打 烊 了' : '打 烊 结 算';
   $('#restock').textContent = shut ? '明 天 再 摆' : '补 货'; $('#restock').disabled = shut;
-  $('#hint').textContent = shut ? '今天打过烊了，门口挂上了牌子，明天再开门' : empty ? '柜子还空着。柜台旁边的小门是后厨，做几盘菜再来补货' : '拖动转着看 · 点柜子里的吃的、软木板上的明信片、门边的信箱、柜台旁的后厨门';
+  $('#hint').textContent = shut ? '今天打过烊了，门口挂上了牌子，明天再开门' : empty ? '柜子还空着。柜台旁边的小门是后厨，做几盘菜再来补货' : '拖动转着看 · 点柜子里的吃的（摆久了能撤下、倒掉）、软木板上的明信片、门边的信箱、柜台旁的后厨门';
 }
 
 // ---------- 种子铺：花种子拿去园子里种，菜种子进口袋、去田里种，熟了收进厨房 ----------

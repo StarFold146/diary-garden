@@ -35,6 +35,10 @@ button{font:inherit;color:inherit;border:0;background:0 0;cursor:pointer}
 .sheet ul{list-style:none;padding:0;margin:8px 0;font-size:13px;line-height:1.9}
 .sheet li{display:flex;justify-content:space-between;gap:8px;border-bottom:.5px dashed rgba(90,60,50,.2)}
 .sheet li b{font-weight:400;color:var(--brick);white-space:nowrap}
+.sheet .acts{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:.5px dashed rgba(90,60,50,.2)}
+.sheet .acts .meta{flex:1}
+.sheet .acts .go{padding:6px 14px;font-size:12px;letter-spacing:.2em;text-indent:.2em}
+.sheet .acts .go.warn{color:var(--brick)}
 .sheet .sum{display:flex;justify-content:space-between;margin-top:6px;font-size:14px}
 .sheet .sum b{font-weight:400;color:var(--brick)}
 /* 种子铺：钱不够按钮变灰，价钱照样写着 */
@@ -98,7 +102,7 @@ button{font:inherit;color:inherit;border:0;background:0 0;cursor:pointer}
 <div id="hint">拖动转着看 · 点柜子里的吃的、软木板上的明信片、门边的信箱</div>
 <div id="bar"><button class="go ghost" id="restock">补 货</button><button class="go ghost" id="seedsBtn">种 子</button><button class="go" id="close">打 烊 结 算</button></div>
 
-<div class="sheet" id="dish" hidden><button class="x" data-close>×</button><h3 id="dName"></h3><div class="meta" id="dMeta"></div><p id="dAbout"></p></div>
+<div class="sheet" id="dish" hidden><button class="x" data-close>×</button><h3 id="dName"></h3><div class="meta" id="dMeta"></div><p id="dAbout"></p><div class="acts"><span class="meta" id="dAge"></span><button class="go ghost" id="dBack">撤 下</button><button class="go ghost" id="dToss">倒 掉</button></div></div>
 <div class="sheet" id="bill" hidden><button class="x" data-close>×</button><h3>今天的账</h3><div class="meta" id="bDate"></div><ul id="bList"></ul><div class="sum"><span id="bLeft"></span><span>进账 <b id="bSum"></b></span></div></div>
 <div class="sheet" id="seeds" hidden><button class="x" data-close>×</button><h3>种 子 铺</h3><div class="meta">手上 <span id="sCoins"></span> · 花种子一包 3 粒，种一丛稀 1 中 2 密 3 · 菜种子一包 2 粒，进口袋，去田里种，熟了一粒收 1–3 份</div>
   <div class="sh" id="sSeasonH">应季（过了季就下架）</div><ul id="sSeason"></ul><div class="sh">花（拿去园子里种）</div><ul id="sFlower"></ul><div class="sh">菜（种子进口袋，去田里种）</div><ul id="sCrop"></ul></div>
