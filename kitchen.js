@@ -106,7 +106,7 @@ function showPicker(keep) {
 }
 
 let mods = null;
-const loadMods = () => mods || (mods = Promise.all([import('three'), import('three/addons/controls/OrbitControls.js'), import('./shop/look.js'), import('./town/look2.js'), import('./town/mem.js'), import('./town/food.js'), import('./autumn.js')]));   /* 最后那个是秋天三样的小件和盛器 */
+const loadMods = () => mods || (mods = Promise.all([import('three'), import('three/addons/controls/OrbitControls.js'), import('./shop/look.js'), import('./town/look2.js'), import('./town/mem.js'), import('./town/food.js'), import('./seasonfood.js')]));   /* 最后那个是应季菜（秋、冬）的小件和盛器 */
 
 /* 生火中：进度条 2.1 秒缓出，提示每 0.7 秒换一句，模块到了再进厨房（暮园原样） */
 async function fire() {

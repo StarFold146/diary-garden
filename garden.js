@@ -12,7 +12,7 @@ import * as TM from './town/mem.js';
 import * as LAND from './town/land.js';
 import * as FR from './town/fr.js';
 import * as SP from './town/species.js';   /* 应季菜（南瓜、栗子、柿子）照说明长，田里用 */
-import * as AU from './autumn.js';   /* 秋天三样：南瓜趴在藤上、栗子挂刺壳、柿子顶着柿蒂，不再是圆球 */
+import * as AU from './seasonfood.js';   /* 应季菜：秋天南瓜栗子柿子（autumn.js）、冬天萝卜白菜砂糖橘（winter.js），不再是圆球 */
 import * as Day from './day.js';   /* 种子、花位、换天 */
 import * as Hy from './hybrid.js';
 import * as VB from './vasebook.js';   /* 花谱的库：长按一盆收回花谱或者卖掉 */   /* 杂交：两盆挨着过一夜冒苗 */
@@ -505,7 +505,8 @@ function addHybridSp() {
 function addSeasonalSp() {
   for (const s of Object.values(Hy.SPECIES)) {
     if (!s.season || PLANT_SP.some((x) => x.id === s.id)) continue;
-    PLANT_SP.push({ id: s.id, zh: s.zh, c: [s.c], kind: 'cosmos', seasonal: true });
+    let kind = 'cosmos'; if (s.season !== 'autumn') try { const P = Hy.paramsOf(s.genes); kind = P.cluster ? 'mound' : P.dbl ? (P.scale > 1.2 ? 'peony' : 'rose') : P.n >= 7 ? 'daisy' : 'cosmos'; } catch (e) {}   /* 秋晃晃照旧；冬天的梅攒成团、山茶重瓣 */
+    PLANT_SP.push({ id: s.id, zh: s.zh, c: [s.c], kind, seasonal: true });
   }
   /* 送的花（hybrid.js 里带 gift 的）：口袋里有它的种子才出现在种花面板里，颜色取渐变的头一个 */
   let planted = []; try { planted = (JSON.parse(localStorage.getItem('diarytown_beds') || '[]') || []).map((b) => b.sp); } catch (e) {}   /* 种子用完了，已经种下的那几丛照样认得 */
@@ -1088,7 +1089,7 @@ function sproutModel(stage, k) {
 function cropModel(p, k) {
   const st = plotStage(p), kind = p.kind, sp = TM.SPECIES[kind];
   if (st <= 1) return sproutModel(st, k);   /* 小镇作物的「小苗」是褪了色的样子（那边是记忆快忘了），田里自己画一根绿苗 */
-  if (AU.has(kind)) return AU.plant(kind, st, k);   /* 秋天三样用自己的样子（autumn.js） */
+  if (AU.has(kind)) return AU.plant(kind, st, k);   /* 应季菜用自己的样子（seasonfood.js） */
   if (sp && sp.spec) return hang(SP.plant(sp.spec, st, k), kind);
   if (kind === 'bloom' && st < 3) return sproutModel(st, k); 
   if (!DOMAIN_OF[kind] && kind !== 'bloom') return sproutModel(Math.min(st, 2), k);

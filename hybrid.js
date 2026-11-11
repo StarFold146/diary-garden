@@ -80,10 +80,14 @@ Object.assign(SPECIES, {
   blue2: rare('blue2', '泪滴铃', '#c9d8ea', { n: 5, shape: 2, notch: 0, cup: 2, ruffle: 0, form: 2, size: 2, height: 3 }),
   blue3: rare('blue3', '雾蓝盏', '#bccfe4', { n: 5, shape: 3, notch: 0, cup: 2, ruffle: 0, form: 3, size: 2, height: 3 }),
 });
-/* 季节花：不进心情领花，只在种子铺秋天（9–11 月）上架，过季下架；是底子，能杂交，起名规则认它。
+/* 季节花：不进心情领花，只在种子铺当季上架（season 写季节名，按节气算），过季下架；是底子，能杂交，起名规则认它。
    白色写死在 c 里（基因调不出纯白），杂交出来的后代走基因色 */
 Object.assign(SPECIES, {
-  anemone: { ...base('anemone', '秋晃晃', '#f8f4ec', { n: 6, shape: 4, notch: 0, cup: 1, ruffle: 0, form: 7, size: 2, height: 4 }), rare: true, season: [9, 10, 11] },   /* rare 让园子按 colorsOf 上色（白），不走心情色 */
+  anemone: { ...base('anemone', '秋晃晃', '#f8f4ec', { n: 6, shape: 4, notch: 0, cup: 1, ruffle: 0, form: 7, size: 2, height: 4 }), rare: true, season: 'autumn' },   /* rare 让园子按 colorsOf 上色（白），不走心情色 */
+  /* 冬天三样（立冬到立春）：梅五瓣小、一枝开好几朵；水仙六瓣带一圈黄副冠；山茶重瓣圆团。颜色各自一块饱和的 */
+  meihua: { ...base('meihua', '寒梅点', '#d8344f', { n: 5, shape: 4, notch: 0, cup: 1, ruffle: 0, form: 1, size: 1, height: 3 }), rare: true, season: 'winter' },
+  narcissus: { ...base('narcissus', '凌波盏', '#f7f2e2', { n: 6, shape: 2, notch: 0, cup: 1, ruffle: 0, form: 8, size: 2, height: 3 }), rare: true, season: 'winter' },
+  camellia: { ...base('camellia', '雪里团', '#c8213a', { n: 7, dbl: 1, shape: 4, notch: 0, cup: 2, ruffle: 1, form: 4, size: 3, height: 2 }), rare: true, season: 'winter' },
 });
 Object.assign(SPECIES, {
   weiwei: { ...base('weiwei', String.fromCharCode(21807, 21807, 33457), '#f6a3c0', { n: 6, dbl: 1, shape: 3, notch: 1, cup: 2, ruffle: 2, form: 4, size: 3, height: 3 }), rare: true, gift: true, grad: ['#ea6b97', '#fde3ec'] },
@@ -99,10 +103,14 @@ export const lookOf = (f) => { const s = f && f.species && SPECIES[f.species]; r
 export const canBreed = (id) => { const s = speciesById(id); return !!s && !s.gift; };
 export const lipOf = (f) => { const s = f && f.species && SPECIES[f.species]; return s && s.lip ? s.lip : null; }; 
 export const gradOf = (f) => { const s = f && f.species && SPECIES[f.species]; return s && s.grad ? s.grad : null; };
-const monthOf = (now) => (now instanceof Date ? now : new Date(now || Date.now())).getMonth() + 1;
-export const inSeason = (id, now) => { const s = SPECIES[id]; return !!s && (!s.season || s.season.includes(monthOf(now))); };
+/* 季节按节气分（固定日期够用）：立春 2/4、立夏 5/5、立秋 8/7、立冬 11/7。day.js 也从这儿拿 */
+export function seasonOf(now) {
+  const d = now instanceof Date ? now : new Date(now || Date.now()), md = (d.getMonth() + 1) * 100 + d.getDate();
+  return md >= 1107 || md < 204 ? 'winter' : md < 505 ? 'spring' : md < 807 ? 'summer' : 'autumn';
+}
+export const inSeason = (id, now) => { const s = SPECIES[id]; return !!s && (!s.season || s.season === seasonOf(now)); };
 /* 这会儿当季的季节花（种子铺读这个上架）；now 可传日期或毫秒 */
-export const seasonal = (now) => Object.values(SPECIES).filter((s) => s.season && s.season.includes(monthOf(now)));
+export const seasonal = (now) => { const se = seasonOf(now); return Object.values(SPECIES).filter((s) => s.season === se); };
 const ALIAS = { tired: 'down', blue: 'calm' };   /* 累、难过常见的那种借垂雨铃、澄水莲 */
 export const MOODS = ['happy', 'sweet', 'calm', 'coax', 'down', 'messy', 'cross', 'tired', 'blue'];
 /* 一个心情的三种花：[常见, 少见, 少见]，常见就是旧映射那种，所以没存 species 的老记录照旧 */

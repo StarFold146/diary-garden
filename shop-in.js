@@ -9,7 +9,7 @@ import * as K from './town/food.js';
 import { SPECIES, dishOf, useSpecies } from './town/mem.js';
 import * as Day from './day.js';   /* 一天开一次店、结一次账、补一次货；种子铺 */
 import './bag.js';   /* 背包 */
-import * as AU from './autumn.js';   /* 秋天三样的小件和盛器，柜子里也照厨房那样摆 */
+import * as AU from './seasonfood.js';   /* 应季菜（秋、冬）的小件和盛器，柜子里也照厨房那样摆 */
 useSpecies(Day.seasonSpecs());   /* 应季菜（南瓜、栗子、柿子）登记进小镇的菜谱，后厨端出来的应季菜柜子里才摆得出来 */
 
 const $ = (s) => document.querySelector(s);
@@ -26,6 +26,28 @@ const NOTES = [
   ['听说你每天往花园里种一句话，我也想试试，就是不知道写什么。', '猫头鹰阿夜'],
   ['你柜子上那朵蓝色的小花是什么？我找了半个镇子都没找到一样的。', '小羊棉棉'],
 ];
+/* 冬天（立冬到立春，day.js 的 seasonOf）信箱多这几张，和上面的混着抽 */
+const NOTES_WINTER = [
+  ['早上窗上结了一层霜，我用爪子在上面画了你店门口的招牌。', '松鼠栗栗'],
+  ['我要冬眠了，睡前想再来吃一回，柜子里给我留一盘好不好。', '獾子大福'],
+  ['镇口的池塘冻上了，阿灰在冰上摔了三跤，还说一点都不疼。', '麻雀豆豆'],
+  ['夜里雪下得没声音，早上推门才知道，你门口那串脚印是我的。', '刺猬老墨'],
+  ['围巾织到一半线不够了，你店里那块红格子桌布的颜色真好看。', '小羊棉棉'],
+  ['冬天信送得慢，鼻子冻红了，在你门口烤了会儿手才走。', '邮差小鸭'],
+  ['天黑得早，四点多就点灯，你窗户那片黄是整条街最先亮的。', '猫头鹰阿夜'],
+  ['地里的萝卜拔出来还带着冰碴子，洗干净一咬是甜的。', '鼹鼠土豆'],
+];
+/* 买走菜的那位回的信：打烊时把卖掉的记进 diarytown_sold_notes（最近 6 条），近 3 天有卖出就一半概率抽一封，{d} 换成菜名 */
+const REPLIES = [
+  '{d}带回去热了一下，屋里一下就暖了。',
+  '昨天那盘{d}我没舍得一口吃完，留了半盘当早饭。',
+  '{d}分了隔壁一口，他追着问在哪儿买的。',
+  '{d}好吃。下回要是还有，记得给我留一盘。',
+  '吃完{d}在窗边坐了半天，外面刮风也不觉得冷。',
+];
+const SOLD_KEY = 'diarytown_sold_notes';
+const soldNotes = () => { try { const a = JSON.parse(localStorage.getItem(SOLD_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } };
+function keepSold(list) { try { localStorage.setItem(SOLD_KEY, JSON.stringify([...list, ...soldNotes()].slice(0, 6))); } catch (e) {} }
 let seed = 11; const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
@@ -445,7 +467,16 @@ function showDish(d, slot) {
 }
 function showCard(f, url) { $('#pcImg').src = url; const d = new Date(f.at); $('#pcMeta').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日 · 从花园寄回来的`; $('#pcBig').hidden = false; }
 let lastNote = -1;
-function showNote() { let i; do { i = Math.floor(Math.random() * NOTES.length); } while (i === lastNote && NOTES.length > 1); lastNote = i; $('#nTxt').textContent = NOTES[i][0]; $('#nSign').textContent = '—— ' + NOTES[i][1]; $('#note').hidden = false; }
+function showNote() {
+  const recent = soldNotes().filter((x) => x && x.name && Date.now() - (+x.at || 0) < 3 * 86400e3);
+  let txt, who;
+  if (recent.length && Math.random() < .5) { const r = pick(recent); txt = pick(REPLIES).split('{d}').join(r.name); who = r.who; lastNote = -1; }
+  else {
+    const pool = Day.seasonOf() === 'winter' ? [...NOTES_WINTER, ...NOTES] : NOTES;
+    let i; do { i = Math.floor(Math.random() * pool.length); } while (i === lastNote && pool.length > 1); lastNote = i; [txt, who] = pool[i];
+  }
+  $('#nTxt').textContent = txt; $('#nSign').textContent = '—— ' + who; $('#note').hidden = false;
+}
 
 // ---------- 花币、打烊结算、补货 ----------
 const getCoins = () => { try { return +(localStorage.getItem('diarytown_coins') || 0) || 0; } catch (e) { return 0; } };
@@ -462,6 +493,7 @@ $('#close').onclick = () => {
     const d = STATE[i]; sold.push({ d, who: pick(FOLKS) }); sum += d.price; STATE[i] = null;
   });
   saveState(); renderCase(); setCoins(getCoins() + sum);
+  if (sold.length) { const at = Date.now(); keepSold(sold.map((x) => ({ name: x.d.name, who: x.who, at }))); }   /* 信箱里的回信从这儿抽 */
   const left = STATE.filter(Boolean).length;
   $('#bDate').textContent = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }) + ' 打烊';
   $('#bList').innerHTML = sold.length ? sold.map((s) => `<li><span>${s.who} 买走了 ${s.d.name}</span><b>+${s.d.price}</b></li>`).join('') : '<li><span>今天没人进门，柜子里的明天接着摆</span></li>';

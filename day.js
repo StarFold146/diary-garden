@@ -60,17 +60,25 @@ export const flowerSeeds = () => {
   for (const k in hy) hy[k] = { ...hy[k], p: HY_PRICE(hy[k].p) };
   return { ...FLOWER_SEEDS, ...hy };
 };
-/* —— 应季：种子铺顶上一栏「应季」，过季就下架。花的季节写在 hybrid.js（SPECIES 的 season 月份，Hy.seasonal 读），
+/* —— 应季：种子铺顶上一栏「应季」，过季就下架。花的季节写在 hybrid.js（SPECIES 的 season 季节名，Hy.seasonal 读），
    菜写在下面这张 SEASONAL 表里，一季一格，冬春夏以后往空格里填就行。下架只是不卖了，手上剩的种子和菜照样能种能做 —— */
-export const SEASONS = { spring: [3, 4, 5], summer: [6, 7, 8], autumn: [9, 10, 11], winter: [12, 1, 2] };
+/* 季节按节气分：立春 2/4、立夏 5/5、立秋 8/7、立冬 11/7（算法在 hybrid.js 的 seasonOf，花和菜共用一个） */
 export const SEASON_ZH = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
-const monthOf = (now) => (now instanceof Date ? now : new Date(now || Date.now())).getMonth() + 1;
-export const seasonOf = (now) => Object.keys(SEASONS).find((k) => SEASONS[k].includes(monthOf(now)));
+export const seasonOf = (now) => Hy.seasonOf(now);
 export const SEASON_FLOWER_PRICE = 70;
 /* 应季菜：zh、p 照 CROP_SEEDS；spec 是记忆小镇新品种那套说明（town/species.js 的 RULES），厨房和店里拿它长样子、切小件、起菜名；
    vessel 借哪样老菜的盛器（南瓜汤用杂思菜那只汤碗，柿子布丁用调色瓜的高脚杯，栗子用潮汐稻的小木板） */
 export const SEASONAL = {
-  spring: {}, summer: {}, winter: {},
+  spring: {}, summer: {},
+  /* 冬天三样（立冬起上架）：白萝卜、大白菜、冬笋，长相在 winter.js 单画 */
+  winter: {
+    radish: { zh: '白萝卜', p: 40, vessel: 'thoughtleaf', soup: '#efe6cf', spec: { id: 'radish', zh: '白萝卜', pre: '萝卜', cooked: '萝卜汤', about: '白胖的身子半截露在土外，顶着一大簇叶子。', fruit: '#e6dfcc', leaf: '#6f9a5a', flesh: '#f6f1e3',
+      plant: { habit: 'rosette', height: .25 }, fruitShape: { shape: 'egg', size: .045, count: 1, squash: 1.3 }, piece: { cut: 'ring' } } },
+    napa: { zh: '大白菜', p: 45, vessel: 'thoughtleaf', spec: { id: 'napa', zh: '大白菜', pre: '白菜', cooked: '醋溜白菜', about: '一棵棵包得紧紧的，外头绿里头白，霜打过更甜。', fruit: '#c7d79a', leaf: '#7fa863', flesh: '#f0eed6',
+      plant: { habit: 'rosette', height: .3 }, fruitShape: { shape: 'egg', size: .055, count: 1, squash: 1.4 }, piece: { cut: 'slice' } } },
+    bamboo: { zh: '冬笋', p: 55, vessel: 'tiderice', spec: { id: 'bamboo', zh: '冬笋', pre: '笋香', cooked: '油焖冬笋', about: '土里冒出半截尖尖，裹着一层层棕黄的笋壳。', fruit: '#b8925a', leaf: '#7f9a5a', flesh: '#efe3bd',
+      plant: { habit: 'stalk', height: .22 }, fruitShape: { shape: 'egg', size: .045, count: 2, squash: 1.4 }, piece: { cut: 'slice' } } },
+  },
   autumn: {
     pumpkin: { zh: '南瓜', p: 50, vessel: 'thoughtleaf', soup: '#efb262', spec: { id: 'pumpkin', zh: '南瓜', pre: '南瓜', cooked: '南瓜汤', about: '藤上趴着扁扁的橙南瓜，打过霜更甜。', fruit: '#e0954a', leaf: '#7f9a6a', flesh: '#f4c983',
       plant: { habit: 'vine', height: .4 }, fruitShape: { shape: 'ball', size: .05, count: 2, squash: .75 }, piece: { cut: 'wedge' } } },
@@ -85,6 +93,9 @@ export const SEASON_SPECIAL = {
   'chestnut+pumpkin': ['栗子南瓜煲', '南瓜炖得起沙，栗子一咬就酥，一锅都是秋天。'],
   'chestnut+persimmon': ['柿饼栗子糕', '柿子晒成饼，夹一层栗子泥，切开一圈橙一圈黄。'],
   'persimmon+pumpkin': ['南瓜柿子羹', '两样橙色煮一锅，甜得很安静。'],
+  'napa+radish': ['萝卜白菜煲', '萝卜炖得透亮，白菜软在汤里，冬天就想喝这一口。'],
+  'bamboo+radish': ['冬笋萝卜汤', '萝卜炖软了，冬笋还脆着，一碗清汤鲜得很。'],
+  'bamboo+napa': ['冬笋炒白菜', '冬笋切片和白菜一起下锅，炒得油亮，脆的软的都有。'],
 };
 const allSeasonCrops = () => Object.assign({}, ...Object.values(SEASONAL));
 /* 这会儿上架的应季花 / 菜：{ id: { zh, p, c?, season } } */
@@ -125,7 +136,7 @@ export const cropSeedCount = (k) => +cropSeeds()[k] || 0;
 export function useCropSeed(k) { const s = cropSeeds(); if (!(s[k] > 0)) return false; s[k]--; put('diarytown_cropseeds', s); return true; }
 export function buyCropSeed(k) { const it = CROP_SEEDS[k] || seasonCropSeeds()[k]; if (!it || !spend(it.p)) return false; const s = cropSeeds(); s[k] = (+s[k] || 0) + CROP_PACK; put('diarytown_cropseeds', s); return true; }
 /* 长多久（钟头）：便宜的快，贵的慢，应季的再慢一点 */
-export const GROW_H = { thoughtleaf: 2, tiderice: 3, boltbean: 3, heartberry: 4, lanternplant: 5, twinpeach: 6, palettemelon: 6, velvetgrape: 5, bloom: 8, chestnut: 9, pumpkin: 10, persimmon: 10 };
+export const GROW_H = { thoughtleaf: 2, tiderice: 3, boltbean: 3, heartberry: 4, lanternplant: 5, twinpeach: 6, palettemelon: 6, velvetgrape: 5, bloom: 8, chestnut: 9, pumpkin: 10, persimmon: 10, radish: 8, napa: 9, bamboo: 10 };
 export const growMs = (k) => (GROW_H[k] || 4) * 3600e3;
 /* 田：18 块地，diarytown_field 存 [{ kind, plantedAt, growMs } | null]；没有这个键时返回 null，让 garden.js 按老田里画着的作物搬过来。
    扩建能给田加一排两排（一排 6 块，最多 30 块）：garden.js 按建好了几排传 n，新加的地接在 18 块后面 */
